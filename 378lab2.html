@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chapter 4 Example 10: Painting the tilemap on the canvas</title>
+<script src="modernizr.js"></script>
+<script type="text/javascript">
+window.addEventListener('load', eventWindowLoaded, false);
+function eventWindowLoaded() {
+	canvasApp();
+}
+
+function canvasSupport () {
+  	return Modernizr.canvas;
+}
+
+var tilePatterns = [[0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4],
+						  [0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 4],
+						  [0, 0, 0, 0, 1, 1, 2, 3, 3, 4],
+						  [0, 0, 1, 1, 2, 3, 4],
+						  [0, 1, 2, 3, 4]];
+var hexUp = {
+	points: [
+		{x: 0, y: 30}, //moveTo & lineTo #6
+		{x: 30*Math.sqrt(3), y: 0}, //lineTo #1
+		{x: 60*Math.sqrt(3), y: 30},
+		{x: 60*Math.sqrt(3), y: 90},
+		{x: 30*Math.sqrt(3), y: 120},
+		{x: 0, y: 90}]
+}
+var hexLeft = {
+	points: [
+		{x: -30*Math.sqrt(3), y: 120}, //moveTo & lineTo #6
+		{x: 0, y: 90}, //lineTo #1
+		{x: 30*Math.sqrt(3), y: 120},
+		{x: 30*Math.sqrt(3), y: 180},
+		{x: 0, y: 210},
+		{x: -30*Math.sqrt(3), y: 180}]
+}
+var hexRight = {
+	points: [
+		{x: 30*Math.sqrt(3), y: 120}, //moveTo & lineTo #6
+		{x: 60*Math.sqrt(3), y: 90}, //lineTo #1
+		{x: 90*Math.sqrt(3), y: 120},
+		{x: 90*Math.sqrt(3), y: 180},
+		{x: 60*Math.sqrt(3), y: 210},
+		{x: 30*Math.sqrt(3), y: 180}]
+}
+var hexObjects = [hexUp, hexLeft, hexRight];
+var count = 23;
+var canvas;
+var context;
+var rightNum;
+var leftNum;
+
+function canvasApp(){
+	if (!canvasSupport()) {
+			 return;
+  	}else{
+	    canvas = document.getElementById('canvas');
+	    context = canvas.getContext('2d');
+	}
+	drawScreen();
+}
+
+function drawScreen() {
+	context.fillStyle="#ffbb00";
+	context.fillRect(0,0,280,290);
+	context.font = "20px Arial";
+	context.fillStyle = "black";
+
+	if(count >= 0){
+		rightNum = Math.floor(Math.random() * (5));
+		leftNum = Math.floor(Math.random() * (tilePatterns[rightNum].length));
+		drawHex(hexUp, 5);
+		drawHex(hexLeft, leftNum);
+		drawHex(hexRight, rightNum);
+		drawArrow();
+		context.fillText("remaining:", 10, 30);
+		context.fillText(count, 110, 30);
+		count--;
+	}
+	else {
+		context.fillText("Game Over!", 10, 30);
+	}
+}
+
+function drawHex(hex, hexColor) {
+	context.strokeStyle = "white";
+	context.lineWidth = 2;
+	context.shadowBlur = 30;
+	context.shadowColor = "black";
+	context.shadowOffsetX = 20;
+	context.shadowOffsetY = 20;
+	outlineHex(hex);
+	context.fillStyle = colorTile(hexColor);
+	context.fill();
+	context.closePath();
+	context.shadowBlur = 0;
+	context.shadowColor = 0;
+	context.shadowOffsetX = 0;
+	context.shadowOffsetY = 0;
+	context.stroke();
+}
+
+function colorTile(color) {
+		if(color == 0) return 'rgba(0, 100, 0, 255)';				//jungle
+		else if(color == 1) return 'rgba(0, 225, 0, 255)';			//grass
+		else if(color == 2) return 'rgba(255, 201, 102, 255)';	//desert
+		else if(color == 3) return 'rgba(123, 123, 139, 255)';	//quarry
+		else if(color == 4) return 'rgba(0, 191, 255, 255)';		//lagoon
+		else if(color == 5) return 'rgba(255, 48, 48, 255)';		//volcano
+	}
+
+function drawArrow() {
+		context.save();
+		context.rotate(60*Math.PI / 180);
+		context.transform(1, 0, 0, 1, 15, -140);
+		context.fillStyle = 'rgb(181, 24, 7)';
+		context.fillRect(80*Math.sqrt(3),40*Math.sqrt(3),20,8);
+		context.restore();
+		context.fillStyle = "black";
+		context.beginPath();
+		context.moveTo(78*Math.sqrt(3),70*Math.sqrt(3));
+		context.lineTo(89*Math.sqrt(3),64*Math.sqrt(3));
+		context.lineTo(89*Math.sqrt(3),78*Math.sqrt(3));
+		context.lineTo(78*Math.sqrt(3),70*Math.sqrt(3));
+		context.closePath();
+		context.fill();
+	}
+
+function outlineHex(hex){
+	var x = 80;
+	var y = 40;
+	var p = hex.points;
+	context.beginPath();
+	context.moveTo(x + p[0].x, y + p[0].y);
+	for(var i = 1; i < 6; i++){
+		context.lineTo(x + p[i].x, y + p[i].y);
+	}
+	context.lineTo(x + p[0].x, y + p[0].y);
+}
+
+function handleClick() {
+	var e = window.event;
+	var mouseX = e.clientX - 50;
+	var mouseY = e.clientY - 50;
+	console.log(mouseX, mouseY);
+	for(var i = 0; i < hexObjects.length; i++) {
+		var hex = hexObjects[i];
+		outlineHex(hex);
+		if(context.isPointInPath(mouseX, mouseY)) {
+			drawScreen();
+		}
+	}
+}
+
+</script>
+</head>
+<body>
+<div style="position: absolute; top: 50px; left: 50px;">
+<canvas id="canvas" width="500" height="500" onclick=handleClick()>
+ Your browser does not support the HTML 5 Canvas.
+</canvas>
+</div>
+</body>
+</html>
