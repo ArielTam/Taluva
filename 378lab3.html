@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chapter 4 Example 10: Painting the tilemap on the canvas</title>
+<script src="modernizr.js"></script>
+<script type="text/javascript">
+window.addEventListener('load', eventWindowLoaded, false);
+function eventWindowLoaded() {
+	canvasApp();
+}
+
+function canvasSupport () {
+  	return Modernizr.canvas;
+}
+
+//tile stuff
+var tilePatterns = [[0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4],
+						  [0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 4],
+						  [0, 0, 0, 0, 1, 1, 2, 3, 3, 4],
+						  [0, 0, 1, 1, 2, 3, 4],
+						  [0, 1, 2, 3, 4]];
+var allTiles = [];
+for(var i = 0; i < tilePatterns.length; i++) {
+	for(var j = 0; j < tilePatterns[i].length; j++) {
+		var newTile = [];
+		newTile.push(i);
+		newTile.push(tilePatterns[i][j]);
+		allTiles.push(newTile);
+	}
+}
+
+//makes the 6 points for a single hex, pushes to array
+function makeHexPoints(hexPoints, centerX, centerY, size){
+	for(var i = 0; i < 6; i++) {
+		var angle_rad = Math.PI/180 * (60 * i + 30);
+		hexPoints.push({
+			x: centerX + size*Math.cos(angle_rad),
+			y: centerY + size*Math.sin(angle_rad)
+		});
+	}
+}
+//my sad arrow is nothing but hardcoded points & rect
+function makeArrowPoints(arrowPoints) {
+	arrowPoints.push({x: 20, y: 0});
+	arrowPoints.push({x: 30, y: 10});
+	arrowPoints.push({x: 20, y: 20});
+	arrowPoints.push({x: 0, y: 5, l: 20, w: 10})
+}
+//outline & fill arrow
+//TO-DO: ability to flip arrow, so add new param for lava direction?
+//       How do i rotate the entire hex (aka change their tile order in the grid)
+//       and then MOVE THE STUPID ARROW WITH IT/???
+function drawArrow(arrow){
+	context.fillStyle = "black";
+	context.save();
+	context.translate(30*Math.sqrt(3) + 80, 100);
+	context.rotate(Math.PI / 4); //points right
+	//context.rotate(2*Math.PI / 3); //points left, also need to adjust Math in handleMouseMove
+	context.fillRect(arrow[3].x, arrow[3].y, arrow[3].l, arrow[3].w);
+	context.beginPath();
+	context.moveTo(arrow[0].x, arrow[0].y);
+	context.lineTo(arrow[1].x, arrow[1].y);
+	context.lineTo(arrow[2].x, arrow[2].y);
+	context.lineTo(arrow[0].x, arrow[0].y);
+	context.closePath();
+	context.fill();
+	context.restore();
+}
+
+//TO-DO: dump this into a large function to be replicated
+var hexGrid = [];
+var hexUp = [];
+var hexLeft = [];
+var hexRight = [];
+var arrow = [];
+var size = 50;
+makeHexPoints(hexUp, (size/2)*Math.sqrt(3), size, size);
+makeHexPoints(hexLeft, 0, 5*size/2, size);
+makeHexPoints(hexRight, size*Math.sqrt(3), 5*size/2, size);
+hexUp.push({row: -1, col: -1});
+hexLeft.push({row: -1, col: -1});
+hexRight.push({row: -1, col: -1});
+makeArrowPoints(arrow);
+
+//TO-DO: rewrite makeGrid so a hex can be referenced by coordinates
+function makeGrid() {
+	for(var i = 0; i < 10; i++) { //ROW
+		for(var j = 0; j < 5; j++) { //COL
+			var newHex = []; //EVEN rows if indexing from 0
+			makeHexPoints(newHex, i*size*Math.sqrt(3) + size, 3*j*size - size, size);
+			newHex.push({row: 2*j, col: i});
+			hexGrid.push(newHex);
+			newHex = []; //ODD rows
+			makeHexPoints(newHex, i*size*Math.sqrt(3) + size/10, 3*j*size + size/2, size);
+			newHex.push({row: 2*j + 1, col: i});
+			hexGrid.push(newHex);
+		}
+	}
+}
+
+function goToCoords(i, j, hex) {
+	var newHex = [];
+	if(i % 2 == 0){
+		makeHexPoints(newHex, i*size*Math.sqrt(3) + size, 3*j*size - size, size);
+		for(var k = 0; k < 6; k++) {
+			hex[k].x = newHex[k].x;
+			hex[k].y = newHex[k].y;
+		}
+		hex[6].row = 2*j;
+		hex[6].col = i;
+	}
+}
+//outline & stroke for grid, TO-DO: eventually should be invisible
+function drawGrid() {
+	for(var i = 0; i < hexGrid.length; i++) {
+		outlineHex(hexGrid[i]);
+		context.stroke();
+	}
+}
+
+var hexObjects = [hexUp, hexLeft, hexRight, arrow,
+						{isDragging: false},
+						{isSelected: false}];
+var count = 24;
+var canvas, context;
+
+function canvasApp(){
+	if (!canvasSupport()) {
+			 return;
+  	}else{
+	    canvas = document.getElementById('canvas');
+	    context = canvas.getContext('2d');
+		 canvas.onmousedown = handleMouseDown;
+		 canvas.onmouseup = handleMouseUp;
+		 canvas.onmousemove = handleMouseMove;
+	}
+	randTileStack();
+	makeGrid();
+	//BROKEN
+	/*goToCoords(3, 1, hexUp);
+	goToCoords(4, 0, hexLeft);
+	goToCoords(4, 1, hexRight);*/
+	drawScreen();
+}
+
+var leftNum, rightNum;
+//TO-DO: separate remaining count & randomizing color,
+//       tiles should carry their own color
+function randTileStack() {
+	if(count >= 0){
+		randHex = Math.floor(Math.random() * (allTiles.length));
+		leftNum = allTiles[randHex][0];
+		rightNum = allTiles[randHex][1];
+		var index = allTiles.indexOf(allTiles[randHex]);
+		if(index > -1) {
+			allTiles.splice(index, 1);
+		}
+		context.fillText("remaining:", 10, 30);
+		context.fillText(count, 110, 30);
+		count--;
+	}
+	else {
+		context.fillText("Game Over!", 10, 30);
+	}
+}
+//draws individual triHex and background
+function drawScreen() {
+	context.fillStyle="#ddc9b4";
+	context.fillRect(0,0,1000,700);
+	context.fillStyle="#c17c74";
+	context.fillRect(0,0,300,700);
+	context.font = "20px Arial";
+	context.fillStyle = "black";
+	drawGrid();
+	drawHex(hexUp, 5);
+	drawHex(hexLeft, leftNum);
+	drawHex(hexRight, rightNum);
+	drawArrow(arrow);
+}
+//shadows & fills
+function drawHex(hex, hexColor) {
+	context.save();
+	context.shadowBlur = 30;
+	context.shadowColor = "black";
+	context.shadowOffsetX = 20;
+	context.shadowOffsetY = 20;
+	outlineHex(hex);
+	context.fillStyle = colorTile(hexColor);
+	context.fill();
+	context.restore();
+	context.strokeStyle = "white";
+	context.lineWidth = 2;
+	context.stroke();
+}
+//color picker
+function colorTile(color) {
+		if(color == 0) return 'rgba(0, 100, 0, 255)';				//jungle
+		else if(color == 1) return 'rgba(0, 225, 0, 255)';			//grass
+		else if(color == 2) return 'rgba(255, 201, 102, 255)';	//desert
+		else if(color == 3) return 'rgba(123, 123, 139, 255)';	//quarry
+		else if(color == 4) return 'rgba(0, 191, 255, 255)';		//lagoon
+		else if(color == 5) return 'rgba(255, 48, 48, 255)';		//volcano
+	}
+//traces outline only (sans stroke)
+function outlineHex(hex){
+	var x = 80;
+	var y = 40;
+	context.beginPath();
+	context.moveTo(x + hex[0].x, y + hex[0].y);
+	for(var i = 1; i < 6; i++){
+		context.lineTo(x + hex[i].x, y + hex[i].y);
+	}
+	context.lineTo(x + hex[0].x, y + hex[0].y);
+	context.closePath();
+}
+
+var mouseX, mouseY;
+//ROTATE: onkeypress R
+//FLIP: onkeypress F, aka change lava direction AND bottom 2 colors are switched
+//@top onkeypress = handleKeyPress
+//TO-DO: EVERYTHING, IT'S LITERALLY 1 LINE LONG
+function handleKeyPress() {
+	var key = e.keyCode;
+	//uniCharCode for r is 114
+	//						f is 102
+}
+
+//selection on/off
+function handleClick() {
+	mouseX = e.clientX - 50;
+	mouseY = e.clientY - 50;
+	for(var i = 0; i < 3; i++) {
+		var hex = hexObjects[i];
+		outlineHex(hex);
+		if(context.isPointInPath(mouseX, mouseY)) {
+			hexObjects[4].isSelected = true;
+		}
+		else{
+			hexObjects[4].isSelected = false;
+		}
+	}
+}
+
+//turns on dragging
+//TO-DO: mouseDown in the pink area changes it to blue
+//       tiles underneath need to be hidden during pink, shown during blue
+var clickedHex;
+function handleMouseDown() {
+	var e = window.event;
+	mouseX = e.clientX - 50;
+	mouseY = e.clientY - 50;
+	for(var i = 0; i < 3; i++) {
+		var hex = hexObjects[i];
+		outlineHex(hex);
+		if(context.isPointInPath(mouseX, mouseY)) {
+			hexObjects[3].isDragging = true;
+			clickedHex = hex;
+		}
+	}
+}
+
+//turns off dragging
+//TO-DO: if mouseUp in the blue area,
+//       remove shadows and generate new triHex
+//       then decrement remaining count
+function handleMouseUp() {
+	hexObjects[3].isDragging = false;
+	for(var i = 0; i < hexGrid.length; i++) {
+		var backHex = hexGrid[i];
+		outlineHex(backHex);
+		if(context.isPointInPath(mouseX, mouseY)) {
+			console.log(backHex[6].col, backHex[6].row);
+		}
+	}
+}
+
+//basic movement during drag, snap to grid
+//TO-DO: be able to move trihex as a whole during snap to grid
+function handleMouseMove() {
+	if(hexObjects[3].isDragging) {
+		e = window.event;
+		var mx = e.clientX - 50;
+		var my = e.clientY - 50;
+		var dx = mx - mouseX;
+		var dy = my - mouseY;
+
+		for(var i = 0; i < hexObjects.length - 1; i++) {
+			var hex = hexObjects[i];
+			for(var j = 0; j < hex.length; j++) {
+				if(i == 3) { //adjust arrow position
+					hex[j].x += dx * Math.cos(-Math.PI / 4) - dy * Math.sin(-Math.PI / 4);
+					hex[j].y += dx * Math.sin(-Math.PI / 4) + dy * Math.cos(-Math.PI / 4);
+				}
+				else { //adjust hex position
+					hex[j].x += dx;
+					hex[j].y += dy;
+				}
+			}
+		}
+		//snap to backHex
+		for(var i = 0; i < hexGrid.length; i++) {
+			var backHex = hexGrid[i];
+			outlineHex(backHex);
+			if(context.isPointInPath(mouseX, mouseY)) {
+				for(var j = 0; j < clickedHex.length; j++) {
+					clickedHex[j].x = backHex[j].x;
+					clickedHex[j].y = backHex[j].y;
+				}
+				console.log(backHex[6].col, backHex[6].row);
+				//TO-DO: be able to move the other two hex along with it.
+			}
+		}
+
+		drawScreen();
+		mouseX = mx;
+		mouseY = my;
+	}
+}
+
+</script>
+</head>
+<body>
+<div style="position: absolute; top: 50px; left: 50px;">
+<canvas id="canvas" width="1000" height="800">
+ Your browser does not support the HTML 5 Canvas.
+</canvas>
+</div>
+</body>
+</html>
