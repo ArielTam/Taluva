@@ -6,6 +6,7 @@
 <script src="modernizr.js"></script>
 <script type="text/javascript">
 window.addEventListener('load', eventWindowLoaded, false);
+window.addEventListener('keydown', handleKeyPress, false);
 function eventWindowLoaded() {
 	canvasApp();
 }
@@ -14,7 +15,361 @@ function canvasSupport () {
   	return Modernizr.canvas;
 }
 
-//tile stuff
+var canvas, context;
+var hexGrid = [];
+var size = 50;
+var numCol = 11;
+var numRow = 5;
+var triHex= [];
+var count = 24;
+var leftNum, rightNum;
+var firstTilePlacement = true;
+function canvasApp(){
+	if (!canvasSupport()) {
+			 return;
+  	}else{
+	    canvas = document.getElementById('canvas');
+	    context = canvas.getContext('2d');
+		 canvas.onmousedown = handleMouseDown;
+		 canvas.onmouseup = handleMouseUp;
+		 canvas.onmousemove = handleMouseMove;
+	}
+	drawBackground();
+	makeGrid();
+	defaultTriHex(triHex);
+	canvas = document.getElementById('hex0');
+	context = canvas.getContext('2d');
+	canvas.onmousedown = handleMouseDown;
+	canvas.onmouseup = handleMouseUp;
+	canvas.onmousemove = handleMouseMove;
+	drawScreen();
+}
+
+var hutStamp = {cenX: 90, cenY: 500,
+					dx: 90, dy: 500,
+					isDragging: false,
+					count: 80,
+					size: 10,
+					color: "#a07d49"};
+var towerStamp = {cenX: 180, cenY: 500,
+					dx: 180, dy: 500,
+					isDragging: false,
+					count: 8,
+					size: 15,
+					color: "#68a0aa"};
+//var templeStamp = { cenX: 180, cenY: 500,	isDragging: false, count: };
+
+function drawStamp(stamp) {
+	context.beginPath();
+	context.arc(stamp.dx, stamp.dy, stamp.size, 0, 2*Math.PI);
+	context.save();
+	context.fillStyle = stamp.color;
+	context.fill();
+	context.restore();
+}
+
+//my sad arrow is nothing but hardcoded points & rect
+function makeArrowPoints(arrowPoints, centerX, centerY) {
+	arrowPoints.push({x: 20, y: -5});
+	arrowPoints.push({x: 30, y: 5});
+	arrowPoints.push({x: 20, y: 15});
+	arrowPoints.push({x: 0, y: 5, l: 20, w: 10})
+}
+//outline & fill arrow
+function drawArrow(arrow, rotation, centerX, centerY){
+	context.fillStyle = "black";
+	context.save();
+	context.translate(centerX, centerY);
+	context.rotate(Math.PI / 6 + rotation*(45) + 0.5);
+
+	context.fillRect(0, 0, arrow[3].l, arrow[3].w);
+	context.beginPath();
+	context.moveTo(arrow[0].x, arrow[0].y);
+	context.lineTo(arrow[1].x, arrow[1].y);
+	context.lineTo(arrow[2].x, arrow[2].y);
+	context.lineTo(arrow[0].x, arrow[0].y);
+	context.closePath();
+	context.fill();
+	context.restore();
+}
+//makes the 6 points for a single hex, pushes to array
+function makeHexPoints(hexPoints, centerX, centerY, size){
+	for(var i = 0; i < 6; i++) {
+		var angle_rad = Math.PI/180 * (60 * i + 30);
+		hexPoints.push({
+			x: centerX + size*Math.cos(angle_rad),
+			y: centerY + size*Math.sin(angle_rad)
+		});
+	}
+}
+//makes a default trio
+function defaultTriHex(triHex){
+	var hexUp = [];
+	var hexLeft = [];
+	var hexRight = [];
+	var arrow = [];
+	makeHexPoints(hexUp, 0, 0, size);
+	makeHexPoints(hexLeft, 0, 0, size);
+	makeHexPoints(hexRight, 0, 0, size);
+
+	hexUp.push({row: -1,	col: -1,	level: 1, type: 5, cenX: 0, cenY: 0, transpOn: false, rot: 0, flip: 1, arrow: 0});
+	hexLeft.push({row: -1, col: -1, level: 1, type: -1, cenX: 0, cenY: 0, transpOn: false, rot: 0, flip: 1, arrow: 0});
+	hexRight.push({row: -1, col: -1, level: 1, type: -1, cenX: 0, cenY: 0, transpOn: false, rot: 0, flip: 1, arrow: 0});
+
+	goToCoords(1, 4, hexUp);
+	goToCoords(1, 5, hexLeft);
+	goToCoords(2, 5, hexRight);
+
+	triHex.push(hexUp);
+	triHex.push(hexLeft);
+	triHex.push(hexRight);
+
+	randTileStack(triHex); //sets colors
+
+	triHex.push(arrow);
+	triHex.push({isDragging: false,
+					flip: 1,
+					rotation: 0,
+					arrow: 0,
+					shadowOn: true,
+					conflictOn: false});
+}
+//allows hex to be referenced by coordinates
+function makeGrid() {
+	for(var i = 0; i < numCol; i++) { //COL
+		for(var j = 0; j < numRow; j++) { //ROW
+			var newHex = []; //EVEN rows if indexing from 0
+			makeHexPoints(newHex, i*size*Math.sqrt(3) + size, 3*j*size - size, size);
+			newHex.push({row: 2*j, col: i,
+				level: 1, type: -1,
+				cenX: i*size*Math.sqrt(3) + size,
+				cenY: 3*j*size - size,
+				transpOn: false,
+				rot: 0,
+				arrow: 0,
+				huts: 0,
+				towers: 0});
+			//lmao im not putting flip cuz you don't need it after it's placed
+			hexGrid.push(newHex);
+			newHex = []; //ODD rows
+			makeHexPoints(newHex, i*size*Math.sqrt(3) + size/10, 3*j*size + size/2, size);
+			newHex.push({row: 2*j + 1, col: i,
+				level: 1, type: -1,
+				cenX: i*size*Math.sqrt(3) + size/10,
+				cenY: 3*j*size + size/2,
+				transpOn: false,
+				rot: 0,
+				arrow: 0,
+				huts: 0,
+				towers: 0});
+			hexGrid.push(newHex);
+		}
+	}
+}
+//outline & stroke for grid, TO-DO: eventually should be invisible
+//TO-DO: if the type is not -1 then draw the outline and color
+function drawGrid() {
+	for(var i = 0; i < hexGrid.length; i++) {
+		outlineHex(hexGrid[i]);
+		if(hexGrid[i][6].type != -1) {
+			drawHex(hexGrid[i]);
+		}
+		//context.stroke();
+	}
+}
+
+//moves hex to a certain coordinate
+function goToCoords(col, row, hex) {
+	for(var i = 0; i < hexGrid.length; i ++) {
+		if(hexGrid[i][6].row == row && hexGrid[i][6].col == col) {
+			var backHex = hexGrid[i];
+			for(var k = 0; k < 6; k++) {
+				hex[k].x = backHex[k].x;
+				hex[k].y = backHex[k].y;
+			}
+			hex[6].row = row;
+			hex[6].col = col;
+			hex[6].cenX = backHex[6].cenX;
+			hex[6].cenY = backHex[6].cenY;
+			break;
+		}
+	}
+}
+
+function getHexAtCoords(col, row) {
+	for(var i = 0; i < hexGrid.length; i ++) {
+		if(hexGrid[i][6].row == row && hexGrid[i][6].col == col) {
+			return hexGrid[i];
+		}
+	}
+}
+
+//check for hut & tower conflicts, update hut/tower param in trihex if it's ok
+function updateHut(backHex){
+	if(hutStamp.dx != hutStamp.cenX){
+		if(backHex[6].level == 1 && backHex[6].type != -1){
+			if(backHex[6].type == 5){
+				window.alert("You may not build a hut on a volcano.")
+			} else{
+				backHex[6].huts++;
+				hutStamp.count--;
+			}
+		} else{
+			window.alert("You may only build huts on a L1 terrain field.")
+		}
+	}
+}
+
+function updateTower(backHex){
+	if(towerStamp.dx != towerStamp.cenX){
+		if(backHex[6].level >= 3){
+			//AND MUST BE ADJACENT TO settlement
+			//TO-DO: checkSurroundTiles for adjacency with another built settlement
+			if(backHex[6].type == 5) {
+				window.alert("You may not build a tower on a volcano.")
+			} else if (backHex[6].towers != 0) {
+				window.alert("You already built a tower here.")
+			} else {
+				backHex[6].towers++;
+				towerStamp.count--;
+			}
+		} else {
+			window.alert("You may only build a single tower on a L3 or higher terrain field.")
+		}
+	}
+}
+
+//basically only checks that the tiles around it are not empty
+//TO-DO: ahaha there's definitely still something wrong
+function checkPlacementConflict(hex) {
+	var coordsE = [{r: 0, c: -1}, {r: -1, c: 0}, {r: -1, c: 1},
+					{r: 0, c: 1}, {r: 1, c: 1}, {r: 1, c: 0}];
+	var coordsO = [{r: 0, c: -1}, {r: -1, c: -1}, {r: -1, c: 0},
+					{r: 0, c: 1}, {r: 1, c: 0}, {r: 1, c: -1}];
+	//console.log("checking: ", hex[6].row, hex[6].col);
+	for(var k = 0; k < 3; k++){
+		hex = triHex[k];
+		for(var i = 0; i < hexGrid.length; i++) {
+			for(var j = 0; j < coordsE.length; j++) {
+				if(hexGrid[i][6].row % 2 == 0){
+					if((hexGrid[i][6].row == coordsE[j].r + hex[6].row) &&
+						(hexGrid[i][6].col == coordsE[j].c + hex[6].col)) {
+						if(hexGrid[i][6].type != -1){
+							return true;
+						}
+					}
+				} else {
+					if((hexGrid[i][6].row == coordsO[j].r + hex[6].row) &&
+						(hexGrid[i][6].col == coordsO[j].c + hex[6].col)) {
+						if(hexGrid[i][6].type != -1){
+							return true;
+						}
+					}
+				}
+			}
+		}
+	}
+	window.alert("You must connect your tile to already placed tiles.");
+	return false;
+}
+
+function checkEvenGroundConflict(coords) {
+	var levelConflict = false;
+	var conflict = 0;
+	//no free space underneath AKA EVEN GROUND
+	//aka all should start out at level 0
+
+	//find level of each hexGrid
+	var hex1 = getHexAtCoords(coords[0].c, coords[0].r);
+	var hex2 = getHexAtCoords(coords[1].c, coords[1].r);
+	var hex3 = getHexAtCoords(coords[2].c, coords[2].r);
+
+	if(hex1[6].level != hex2[6].level ||
+		hex2[6].level != hex3[6].level ||
+		hex3[6].level != hex1[6].level) {
+		levelConflict = true;
+	}
+
+	for(var i = 0; i < hexGrid.length; i ++) {
+		for(var j = 0; j < coords.length; j ++) {
+			if(hexGrid[i][6].row == coords[j].r && hexGrid[i][6].col == coords[j].c){
+				if(hexGrid[i][6].type != -1) {
+					conflict++;
+				}
+			}
+		}
+	}
+	if(conflict == 1 || conflict == 2 || levelConflict) {
+		window.alert("You must place your tile on even ground.");
+		return false;
+	}
+	return true; //check?????3
+}
+
+function checkVolcanoConflict(coords) {
+	for(var i = 0; i < coords.length; i++){
+		var hex = getHexAtCoords(coords[i].c, coords[i].r);
+		for(var k = 0; k < 3; k++){
+			if(triHex[k][6].type == 5 && triHex[k][6].col == hex[6].col &&
+				triHex[k][6].row == hex[6].row){
+				if(hex[6].type == 5){
+					if(hex[6].arrow == triHex[k][6].arrow){
+						window.alert("You cannot stack a volcano on another volcano of the same direction.");
+						return false;
+					}
+				}
+				else if(hex[6].type != -1){
+					window.alert("You must stack a volcano on top of another volcano.");
+					return false;
+				}
+			}
+		}
+	}
+	return true;
+}
+
+function checkConflicts(){
+	//< ---- EXPAND THE LANDSCAPE: ---- >
+	//TO-DO: check that it is connected with tiles already placed
+	var placement = true;
+	var volcano = true;
+	var evenGround = true;
+	var coords = [{c: triHex[0][6].col, r: triHex[0][6].row},
+					  {c: triHex[1][6].col, r: triHex[1][6].row},
+					  {c: triHex[2][6].col, r: triHex[2][6].row}];
+
+	if(!firstTilePlacement){
+		//console.log("im ready");
+		//TO-DO: FOR A SECOND IT WASN'T WORKING, PLS DOUBLECHECK
+		placement = checkPlacementConflict();
+		volcano = checkVolcanoConflict(coords);
+		evenGround = checkEvenGroundConflict(coords);
+	}
+
+	if(placement && volcano && evenGround){
+		triHex[4].conflictOn = false;
+		for(var k = 0; k < 3; k++) {
+			triHex[k][6].transpOn = false;
+		}
+		return true;
+	}
+	triHex[4].conflictOn = true;
+	for(var k = 0; k < 3; k++) {
+		triHex[k][6].transpOn = true;
+	}
+	return false; //isAllowed var in handleMouseUp
+
+	//< ---- VULCANIC ERUPTION ---- >
+	//TO-DO: check that V on V has different direction
+	//TO-DO: check that tile stacks are V on V tho
+	//checkVolcanoConflict(c1, r1, c2, r2, c3, r3)
+	//TO-DO: no free space underneath AKA EVEN GROUND aka all should start out at level 0
+	//checkEvenGroundConflict(c1, r1, c2, r2, c3, r3)
+	//TO-DO: covered huts are returned
+	//TO-DO: no covering of temples/towers
+	//no covering of complete settlements (???)
+}
+
 var tilePatterns = [[0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4],
 						  [0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 4],
 						  [0, 0, 0, 0, 1, 1, 2, 3, 3, 4],
@@ -29,169 +384,123 @@ for(var i = 0; i < tilePatterns.length; i++) {
 		allTiles.push(newTile);
 	}
 }
-
-//makes the 6 points for a single hex, pushes to array
-function makeHexPoints(hexPoints, centerX, centerY, size){
-	for(var i = 0; i < 6; i++) {
-		var angle_rad = Math.PI/180 * (60 * i + 30);
-		hexPoints.push({
-			x: centerX + size*Math.cos(angle_rad),
-			y: centerY + size*Math.sin(angle_rad)
-		});
-	}
-}
-//my sad arrow is nothing but hardcoded points & rect
-function makeArrowPoints(arrowPoints) {
-	arrowPoints.push({x: 20, y: 0});
-	arrowPoints.push({x: 30, y: 10});
-	arrowPoints.push({x: 20, y: 20});
-	arrowPoints.push({x: 0, y: 5, l: 20, w: 10})
-}
-//outline & fill arrow
-//TO-DO: ability to flip arrow, so add new param for lava direction?
-//       How do i rotate the entire hex (aka change their tile order in the grid)
-//       and then MOVE THE STUPID ARROW WITH IT/???
-function drawArrow(arrow){
-	context.fillStyle = "black";
-	context.save();
-	context.translate(30*Math.sqrt(3) + 80, 100);
-	context.rotate(Math.PI / 4); //points right
-	//context.rotate(2*Math.PI / 3); //points left, also need to adjust Math in handleMouseMove
-	context.fillRect(arrow[3].x, arrow[3].y, arrow[3].l, arrow[3].w);
-	context.beginPath();
-	context.moveTo(arrow[0].x, arrow[0].y);
-	context.lineTo(arrow[1].x, arrow[1].y);
-	context.lineTo(arrow[2].x, arrow[2].y);
-	context.lineTo(arrow[0].x, arrow[0].y);
-	context.closePath();
-	context.fill();
-	context.restore();
-}
-
-//TO-DO: dump this into a large function to be replicated
-var hexGrid = [];
-var hexUp = [];
-var hexLeft = [];
-var hexRight = [];
-var arrow = [];
-var size = 50;
-makeHexPoints(hexUp, (size/2)*Math.sqrt(3), size, size);
-makeHexPoints(hexLeft, 0, 5*size/2, size);
-makeHexPoints(hexRight, size*Math.sqrt(3), 5*size/2, size);
-hexUp.push({row: -1, col: -1});
-hexLeft.push({row: -1, col: -1});
-hexRight.push({row: -1, col: -1});
-makeArrowPoints(arrow);
-
-//TO-DO: rewrite makeGrid so a hex can be referenced by coordinates
-function makeGrid() {
-	for(var i = 0; i < 10; i++) { //ROW
-		for(var j = 0; j < 5; j++) { //COL
-			var newHex = []; //EVEN rows if indexing from 0
-			makeHexPoints(newHex, i*size*Math.sqrt(3) + size, 3*j*size - size, size);
-			newHex.push({row: 2*j, col: i});
-			hexGrid.push(newHex);
-			newHex = []; //ODD rows
-			makeHexPoints(newHex, i*size*Math.sqrt(3) + size/10, 3*j*size + size/2, size);
-			newHex.push({row: 2*j + 1, col: i});
-			hexGrid.push(newHex);
-		}
-	}
-}
-
-function goToCoords(i, j, hex) {
-	var newHex = [];
-	if(i % 2 == 0){
-		makeHexPoints(newHex, i*size*Math.sqrt(3) + size, 3*j*size - size, size);
-		for(var k = 0; k < 6; k++) {
-			hex[k].x = newHex[k].x;
-			hex[k].y = newHex[k].y;
-		}
-		hex[6].row = 2*j;
-		hex[6].col = i;
-	}
-}
-//outline & stroke for grid, TO-DO: eventually should be invisible
-function drawGrid() {
-	for(var i = 0; i < hexGrid.length; i++) {
-		outlineHex(hexGrid[i]);
-		context.stroke();
-	}
-}
-
-var hexObjects = [hexUp, hexLeft, hexRight, arrow,
-						{isDragging: false},
-						{isSelected: false}];
-var count = 24;
-var canvas, context;
-
-function canvasApp(){
-	if (!canvasSupport()) {
-			 return;
-  	}else{
-	    canvas = document.getElementById('canvas');
-	    context = canvas.getContext('2d');
-		 canvas.onmousedown = handleMouseDown;
-		 canvas.onmouseup = handleMouseUp;
-		 canvas.onmousemove = handleMouseMove;
-	}
-	randTileStack();
-	makeGrid();
-	//BROKEN
-	/*goToCoords(3, 1, hexUp);
-	goToCoords(4, 0, hexLeft);
-	goToCoords(4, 1, hexRight);*/
-	drawScreen();
-}
-
-var leftNum, rightNum;
-//TO-DO: separate remaining count & randomizing color,
-//       tiles should carry their own color
-function randTileStack() {
+function randTileStack(triHex) {
 	if(count >= 0){
 		randHex = Math.floor(Math.random() * (allTiles.length));
 		leftNum = allTiles[randHex][0];
 		rightNum = allTiles[randHex][1];
+		triHex[0][6].type = 5;
+		triHex[1][6].type = leftNum;
+		triHex[2][6].type = rightNum;
+		//removing that tile from the deck
 		var index = allTiles.indexOf(allTiles[randHex]);
 		if(index > -1) {
 			allTiles.splice(index, 1);
 		}
-		context.fillText("remaining:", 10, 30);
-		context.fillText(count, 110, 30);
 		count--;
-	}
-	else {
-		context.fillText("Game Over!", 10, 30);
 	}
 }
 //draws individual triHex and background
-function drawScreen() {
-	context.fillStyle="#ddc9b4";
+function drawBackground() {
+	var grad = context.createLinearGradient(0,0,0,200);
+	grad.addColorStop(0,"#c1cfda");
+	grad.addColorStop(1,"#20a4f3");
+	context.fillStyle="#d3ffe9";
 	context.fillRect(0,0,1000,700);
-	context.fillStyle="#c17c74";
-	context.fillRect(0,0,300,700);
-	context.font = "20px Arial";
-	context.fillStyle = "black";
+	context.fillStyle="#03191e";
+	context.fillRect(0,0,280,700);
 	drawGrid();
-	drawHex(hexUp, 5);
-	drawHex(hexLeft, leftNum);
-	drawHex(hexRight, rightNum);
-	drawArrow(arrow);
+	context.font = "28px Lucida Console";
+	context.fillStyle = "white";
+	context.fillText("Player 1's Turn", 10, 50);
+	context.font = "15px Lucida Console";
+	if(count > 0){
+		context.fillText("remaining:", 80, 180);
+		context.fillText(count, 180, 180);
+	} else {
+		context.fillText("Game Over!", 10, 100);
+	}
+}
+//does all the draws for hex and arrows at once
+function drawScreen() {
+	context.clearRect(0, 0, canvas.width, canvas.height);
+	drawBackground(); //redraws the newly painted tiles if placed
+	if(triHex[4].rotation % 2 == 0) {
+		drawHex(triHex[0]);
+		drawHex(triHex[1]);
+		drawHex(triHex[2]);
+	} else {
+		drawHex(triHex[1]);
+		drawHex(triHex[0]);
+		drawHex(triHex[2]);
+	}
+	//TO-DO: draw hut and tower markers hehehe
+	drawStamp(hutStamp);
+	drawStamp(towerStamp);
+	context.save();
+	context.fillStyle = "white";
+	context.fillText("Hut", 80, 530);
+	context.fillText("Tower", 160, 530);
+	context.restore();
 }
 //shadows & fills
-function drawHex(hex, hexColor) {
-	context.save();
-	context.shadowBlur = 30;
-	context.shadowColor = "black";
-	context.shadowOffsetX = 20;
-	context.shadowOffsetY = 20;
-	outlineHex(hex);
-	context.fillStyle = colorTile(hexColor);
-	context.fill();
-	context.restore();
+function drawHex(hex) {
+	context.shadowBlur = 0;
+	context.shadowOffsetX = 0;
+	context.shadowOffsetY = 0;
+	context.globalAlpha = 1.0;
 	context.strokeStyle = "white";
 	context.lineWidth = 2;
+	if(hex == triHex[0] || hex == triHex[1] || hex == triHex[2]) {
+		if(triHex[4].shadowOn) { //shadow only on mousedown
+			context.shadowBlur = 20;
+			context.shadowColor = "black";
+			context.shadowOffsetX = 10;
+			context.shadowOffsetY = 10;
+		}
+		if(hex[6].transpOn) { //transparency during overlap
+			context.globalAlpha = 0.5;
+		}
+		if(triHex[4].conflictOn) {	//red warning outline
+			context.strokeStyle = "red";
+			context.lineWidth = 3;
+		}
+	}
+	outlineHex(hex);
+	context.fillStyle = colorTile(hex[6].type);
+	context.fill();
+	context.globalAlpha = 1.0;
 	context.stroke();
+	if(hex[6].type == 5){ //AKA IT IS A VOLCANO
+		var arrowPoints = [];
+		makeArrowPoints(arrowPoints, hex[6].cenX, hex[6].cenY);
+		drawArrow(arrowPoints, hex[6].arrow, hex[6].cenX, hex[6].cenY);
+	}
+	if(hex != triHex[0] && hex != triHex[1] && hex != triHex[2]) {
+		context.save();
+		context.textAlign = "center";
+		context.fillStyle = "black";
+		context.fillText(`L${hex[6].level}`, hex[6].cenX, hex[6].cenY - 20);
+		if(hex[6].huts > 0){
+			context.beginPath();
+			context.arc(hex[6].cenX - 20, hex[6].cenY, hutStamp.size, 0, 2*Math.PI);
+			context.fillStyle = hutStamp.color;
+			context.fill();
+			context.fillStyle = "white";
+			context.fillText(`${hex[6].huts}`, hex[6].cenX - 20, hex[6].cenY + 5);
+			context.closePath();
+		}
+		if(hex[6].towers > 0){
+			context.beginPath();
+			context.arc(hex[6].cenX + 20, hex[6].cenY, towerStamp.size, 0, 2*Math.PI);
+			context.fillStyle = towerStamp.color;
+			context.fill();
+			context.fillStyle = "white";
+			context.fillText(`${hex[6].towers}`, hex[6].cenX + 20, hex[6].cenY + 5);
+			context.closePath();
+		}
+		context.restore();
+	}
 }
 //color picker
 function colorTile(color) {
@@ -204,127 +513,289 @@ function colorTile(color) {
 	}
 //traces outline only (sans stroke)
 function outlineHex(hex){
-	var x = 80;
-	var y = 40;
 	context.beginPath();
-	context.moveTo(x + hex[0].x, y + hex[0].y);
+	context.moveTo(hex[0].x, hex[0].y);
 	for(var i = 1; i < 6; i++){
-		context.lineTo(x + hex[i].x, y + hex[i].y);
+		context.lineTo(hex[i].x, hex[i].y);
 	}
-	context.lineTo(x + hex[0].x, y + hex[0].y);
+	context.lineTo(hex[0].x, hex[0].y);
 	context.closePath();
 }
+//helper function for FLIP key press
+function swapColors(a, b){
+	var temp = triHex[a][6].type;
+	triHex[a][6].type = triHex[b][6].type;
+	triHex[b][6].type = temp;
+}
 
+var e;
 var mouseX, mouseY;
+var clickedIndex;
 //ROTATE: onkeypress R
 //FLIP: onkeypress F, aka change lava direction AND bottom 2 colors are switched
-//@top onkeypress = handleKeyPress
-//TO-DO: EVERYTHING, IT'S LITERALLY 1 LINE LONG
-function handleKeyPress() {
+function handleKeyPress(){
+	e = window.event;
 	var key = e.keyCode;
-	//uniCharCode for r is 114
-	//						f is 102
-}
+	var row = triHex[0][6].row; //hexUp basically
+	var col = triHex[0][6].col;
 
-//selection on/off
-function handleClick() {
-	mouseX = e.clientX - 50;
-	mouseY = e.clientY - 50;
-	for(var i = 0; i < 3; i++) {
-		var hex = hexObjects[i];
-		outlineHex(hex);
-		if(context.isPointInPath(mouseX, mouseY)) {
-			hexObjects[4].isSelected = true;
+	if(key == 82) { //ROTATE
+		context.clearRect(0, 0, canvas.width, canvas.height);
+		var uColor = triHex[0][6].type;
+		var lColor = triHex[1][6].type;
+		var rColor = triHex[2][6].type;
+		if(triHex[4].rotation % 2 != 0) {
+			if(row % 2 == 0) {
+				goToCoords(col, row + 1, triHex[1]);
+				goToCoords(col + 1, row + 1, triHex[2]);
+			} else {
+				goToCoords(col - 1, row + 1, triHex[1]);
+				goToCoords(col, row + 1, triHex[2]);
+			}
+			triHex[0][6].type = lColor;
+			triHex[1][6].type = rColor;
+			triHex[2][6].type = uColor; //BECOMES THE NEW CENTER FOR THE ARROW
 		}
-		else{
-			hexObjects[4].isSelected = false;
+		else {
+			if(row % 2 == 0) {
+				goToCoords(col - 1, row, triHex[1]);
+				goToCoords(col, row + 1, triHex[2]);
+			} else {
+				goToCoords(col - 1, row, triHex[1]);
+				goToCoords(col - 1, row + 1, triHex[2]);
+			}
+		}
+		if(triHex[4].rotation == 5){
+			triHex[4].rotation = 0;
+		} else {
+			triHex[4].rotation++;
+		}
+	} else if(key == 70) { //FLIP
+		triHex[4].flip *= -1;
+		var r = triHex[4].rotation;
+		if(r == 0 || r == 1){
+			swapColors(1, 2);
+		} else if(r == 2 || r == 3){
+			swapColors(0, 1);
+		} else{
+			swapColors(0, 2);
 		}
 	}
+	if(triHex[4].flip == -1){
+		triHex[4].arrow = triHex[4].rotation + 1;
+	} else{
+		triHex[4].arrow = triHex[4].rotation;
+	}
+	for(var i = 0; i < 3; i++){
+		triHex[i][6].rot = triHex[4].rotation;
+		triHex[i][6].flip = triHex[4].flip;
+		triHex[i][6].arrow = triHex[4].arrow;
+	}
+	drawScreen();
 }
 
-//turns on dragging
-//TO-DO: mouseDown in the pink area changes it to blue
-//       tiles underneath need to be hidden during pink, shown during blue
-var clickedHex;
+//turns on dragging & shadow
 function handleMouseDown() {
-	var e = window.event;
+	e = window.event;
 	mouseX = e.clientX - 50;
 	mouseY = e.clientY - 50;
+
 	for(var i = 0; i < 3; i++) {
-		var hex = hexObjects[i];
+		var hex = triHex[i];
 		outlineHex(hex);
 		if(context.isPointInPath(mouseX, mouseY)) {
-			hexObjects[3].isDragging = true;
-			clickedHex = hex;
+			triHex[4].isDragging = true;
+			clickedIndex = i;
 		}
 	}
+
+	//check if hutStamp was clicked hahahaha
+	context.arc(hutStamp.dx, hutStamp.dy, 10, 0, 2*Math.PI);
+	if(context.isPointInPath(mouseX, mouseY)) {
+		if(hutStamp.count > 0){
+			hutStamp.isDragging = true;
+		} else{
+			window.alert("You have no more huts to build.");
+		}
+	}
+	context.arc(towerStamp.dx, towerStamp.dy, 15, 0, 2*Math.PI);
+	if(context.isPointInPath(mouseX, mouseY)) {
+		if(towerStamp.count > 0){
+			towerStamp.isDragging = true;
+		} else{
+			window.alert("You have no more towers to build.");
+		}
+	}
+
+	triHex[4].shadowOn = true
 }
 
-//turns off dragging
-//TO-DO: if mouseUp in the blue area,
-//       remove shadows and generate new triHex
-//       then decrement remaining count
+//turns off dragging & shadow, resets new tile
 function handleMouseUp() {
-	hexObjects[3].isDragging = false;
+	//first tile placed does not apply to the "connected tiles" rule
+
+	//color the tiles and reset the tile's position with new colors
+	if(mouseX > 280 && triHex[4].isDragging){
+		//RESET TRIHEX POSITION BACK TO START
+		var isAllowed = checkConflicts();
+		for(var i = 0; i < hexGrid.length; i++) {
+			var backHex = hexGrid[i];
+			for(var k = 0; k < 3; k++) {
+				if(triHex[k][6].row == backHex[6].row && triHex[k][6].col == backHex[6].col){
+					//console.log(isAllowed);
+					if(isAllowed) {
+						if(backHex[6].type != -1) {
+							backHex[6].level++;
+						}
+						backHex[6].type = triHex[k][6].type;
+						backHex[6].rot = triHex[k][6].rot;
+						backHex[6].arrow = triHex[k][6].arrow;
+					} else{ //TO-DO: CLEAN UP PROCESS LOOOL
+						goToCoords(1, 4, triHex[0]);
+						goToCoords(1, 5, triHex[1]);
+						goToCoords(2, 5, triHex[2]);
+						triHex[4].rotation = 0;
+						triHex[4].flip = 1;
+						for(var k = 0; k < 3; k++) {
+							triHex[k][6].transpOn = false;
+							triHex[k][6].rot = 0;
+							triHex[k][6].flip = 1;
+							triHex[k][6].arrow = 0;
+						}
+						triHex[4].isDragging = false;
+						triHex[4].shadowOn = false;
+						triHex[4].conflictOn = false;
+						return;
+					}
+				}
+			}
+		}
+		goToCoords(1, 4, triHex[0]);
+		goToCoords(1, 5, triHex[1]);
+		goToCoords(2, 5, triHex[2]);
+		randTileStack(triHex);
+		triHex[4].rotation = 0;
+		triHex[4].flip = 1;
+		for(var k = 0; k < 3; k++) {
+			triHex[k][6].transpOn = false;
+			triHex[k][6].rot = 0;
+			triHex[k][6].flip = 1;
+			triHex[k][6].arrow = 0;
+		}
+	}
+	triHex[4].isDragging = false;
+	triHex[4].shadowOn = false;
+	triHex[4].conflictOn = false;
+
 	for(var i = 0; i < hexGrid.length; i++) {
 		var backHex = hexGrid[i];
 		outlineHex(backHex);
 		if(context.isPointInPath(mouseX, mouseY)) {
-			console.log(backHex[6].col, backHex[6].row);
+			updateHut(backHex);
+			updateTower(backHex);
 		}
 	}
+
+	hutStamp.isDragging = false;
+	hutStamp.dx = hutStamp.cenX;
+	hutStamp.dy = hutStamp.cenY;
+
+	towerStamp.isDragging = false;
+	towerStamp.dx = towerStamp.cenX;
+	towerStamp.dy = towerStamp.cenY;
+
+	if(firstTilePlacement == true){
+		firstTilePlacement = false;
+	}
+
+	drawScreen();
 }
 
-//basic movement during drag, snap to grid
+//basic dragging movement, snap to grid, transparency toggle
 //TO-DO: be able to move trihex as a whole during snap to grid
 function handleMouseMove() {
-	if(hexObjects[3].isDragging) {
-		e = window.event;
-		var mx = e.clientX - 50;
-		var my = e.clientY - 50;
-		var dx = mx - mouseX;
-		var dy = my - mouseY;
+	e = window.event;
+	var mx = e.clientX - 50;
+	var my = e.clientY - 50;
+	var dx = mx - mouseX;
+	var dy = my - mouseY;
 
-		for(var i = 0; i < hexObjects.length - 1; i++) {
-			var hex = hexObjects[i];
-			for(var j = 0; j < hex.length; j++) {
-				if(i == 3) { //adjust arrow position
-					hex[j].x += dx * Math.cos(-Math.PI / 4) - dy * Math.sin(-Math.PI / 4);
-					hex[j].y += dx * Math.sin(-Math.PI / 4) + dy * Math.cos(-Math.PI / 4);
-				}
-				else { //adjust hex position
-					hex[j].x += dx;
-					hex[j].y += dy;
-				}
+	if(triHex[4].isDragging) {
+		for(var k = 0; k < 3; k++) {
+			if(triHex[k][6].transpOn == true) {
+				triHex[k][6].transpOn = false;
 			}
 		}
-		//snap to backHex
+		triHex[4].conflictOn = false;
+
 		for(var i = 0; i < hexGrid.length; i++) {
 			var backHex = hexGrid[i];
+			var row = backHex[6].row;
+			var col = backHex[6].col;
 			outlineHex(backHex);
+			var clickedHex = triHex[clickedIndex];
 			if(context.isPointInPath(mouseX, mouseY)) {
-				for(var j = 0; j < clickedHex.length; j++) {
-					clickedHex[j].x = backHex[j].x;
-					clickedHex[j].y = backHex[j].y;
+				goToCoords(col, row, triHex[clickedIndex]);
+				if(triHex[4].rotation % 2 == 0) {
+					if(clickedIndex == 0) { //hexUp
+						if(row % 2 == 0) {
+							goToCoords(col, row + 1, triHex[1]);
+							goToCoords(col + 1, row + 1, triHex[2]);
+						} else {
+							goToCoords(col - 1, row + 1, triHex[1]);
+							goToCoords(col, row + 1, triHex[2]);
+						}
+					}
+					else if(clickedIndex == 1) { //hexLeft
+						goToCoords(col + 1, row, triHex[2]);
+						if(row % 2 == 0){
+							goToCoords(col + 1, row - 1, triHex[0]);
+						} else {
+							goToCoords(col, row - 1, triHex[0]);
+						}
+					}
+					else if(clickedIndex == 2) { //hexRight
+						goToCoords(col - 1, row, triHex[1]);
+						if(row % 2 == 0) {
+							goToCoords(col, row - 1, triHex[0]);
+						} else {
+							goToCoords(col - 1, row - 1, triHex[0]);
+						}
+					}
+				} else { //rotated upside down!!
+					if(clickedIndex == 0) {
+						if(row % 2 == 0) {
+							goToCoords(col - 1, row, triHex[1]);
+							goToCoords(col, row + 1, triHex[2]);
+						} else {
+							goToCoords(col - 1, row, triHex[1]);
+							goToCoords(col - 1, row + 1, triHex[2]);
+						}
+					} //do i need the two other if statements??
 				}
-				console.log(backHex[6].col, backHex[6].row);
-				//TO-DO: be able to move the other two hex along with it.
 			}
 		}
-
-		drawScreen();
-		mouseX = mx;
-		mouseY = my;
 	}
+
+	if(hutStamp.isDragging){
+		hutStamp.dx += dx;
+		hutStamp.dy += dy;
+	} else if(towerStamp.isDragging){
+		towerStamp.dx += dx;
+		towerStamp.dy += dy;
+	}
+
+	mouseX = mx;
+	mouseY = my;
+	drawScreen();
 }
 
 </script>
 </head>
 <body>
-<div style="position: absolute; top: 50px; left: 50px;">
-<canvas id="canvas" width="1000" height="800">
- Your browser does not support the HTML 5 Canvas.
-</canvas>
+<div style="position: absolute; top: 50px; left: 50px;" id="container">
+<canvas id="canvas" width="1000" height="800" style="position: absolute; z-index: 0"></canvas>
+<canvas id="hex0" width="1000" height="800" style="position: absolute;  z-index: 1"></canvas>
 </div>
 </body>
 </html>
