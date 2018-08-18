@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Chapter 4 Example 10: Painting the tilemap on the canvas</title>
+<title>CSC378 Taluva</title>
 <script src="modernizr.js"></script>
 <script type="text/javascript">
 window.addEventListener('load', eventWindowLoaded, false);
@@ -18,12 +18,142 @@ function canvasSupport () {
 var canvas, context;
 var hexGrid = [];
 var size = 50;
-var numCol = 11;
-var numRow = 5;
+var numCol = 18;
+var numRow = 6;
 var triHex= [];
 var count = 24;
 var leftNum, rightNum;
 var firstTilePlacement = true;
+var eruptionOn = false;
+var expansion = {
+	on: false,
+	chooseSettlement: false,
+	row: 0,
+	col: 0,
+	chooseTerrain: false,
+	terrain: -1
+}
+var expansionOn = false;
+var gameOver = false;
+var win = 0; //uhhhh
+var currPlayer = 1;
+var Player1 = { //1
+	id: "Player 1",
+	color: "#ce8d66", //a07d49
+	settlements: null,
+	placedTile: false,
+	placedBuilding: false,
+	numHuts: 0, //out of 20
+	numTowers: 0, //out of 2
+	numTemples: 0 //out of 3
+};
+var Player2 = { //-1
+	id: "Player 2",
+	color: "#419d78", //68a0aa
+	settlements: null,
+	placedTile: false,
+	placedBuilding: false,
+	numHuts: 0, //out of 20
+	numTowers: 0, //out of 2
+	numTemples: 0 //out of 3
+};
+var hutStamp = {cenX: 60, cenY: 530,
+					dx: 60, dy: 530,
+					isDragging: false,
+					count: 80,
+					size: 10};
+var towerStamp = {cenX: 140, cenY: 530,
+					dx: 140, dy: 530,
+					isDragging: false,
+					count: 8,
+					size: 15};
+var templeStamp = { cenX: 220, cenY: 515,
+					dx: 220, dy: 515,
+					isDragging: false,
+					count: 12};
+
+/*Graph Functions adapted from Benoit Vallon*/
+function Graph() {
+  this.vertices = [];
+  this.edges = [];
+  this.numberOfEdges = 0;
+}
+Graph.prototype.addVertex = function(vertex) {
+  this.vertices.push(vertex);
+  this.edges[vertex] = [];
+};
+Graph.prototype.removeVertex = function(vertex) {
+  var index = this.vertices.indexOf(vertex);
+  if(~index) {
+    this.vertices.splice(index, 1);
+  }
+  while(this.edges[vertex].length) {
+    var adjacentVertex = this.edges[vertex].pop();
+    this.removeEdge(adjacentVertex, vertex);
+  }
+};
+Graph.prototype.addEdge = function(vertex1, vertex2) {
+  this.edges[vertex1].push(vertex2);
+  this.edges[vertex2].push(vertex1);
+  this.numberOfEdges++;
+};
+Graph.prototype.removeEdge = function(vertex1, vertex2) {
+  var index1 = this.edges[vertex1] ? this.edges[vertex1].indexOf(vertex2) : -1;
+  var index2 = this.edges[vertex2] ? this.edges[vertex2].indexOf(vertex1) : -1;
+  if(~index1) {
+    this.edges[vertex1].splice(index1, 1);
+    this.numberOfEdges--;
+  }
+  if(~index2) {
+    this.edges[vertex2].splice(index2, 1);
+  }
+};
+Graph.prototype.BFS = function(vertex) {
+  if(!~this.vertices.indexOf(vertex)) {
+    return 0; //FALSE
+  }
+  var queue = [];
+  queue.push(vertex);
+  var visited = [];
+  visited[vertex] = true;
+
+  var count = 0;
+  while(queue.length) {
+    vertex = queue.shift();
+    count++;
+    for(var i = 0; i < this.edges[vertex].length; i++) {
+      if(!visited[this.edges[vertex][i]]) {
+        visited[this.edges[vertex][i]] = true;
+        queue.push(this.edges[vertex][i]);
+      }
+    }
+  }
+  return count; //TRUE, PLUS NUM SETTLEMENTS
+};
+Graph.prototype.pathFromTo = function(vertexSource, vertexDestination) {
+  if(!~this.vertices.indexOf(vertexSource)) {
+    return false;
+  }
+  var queue = [];
+  queue.push(vertexSource);
+  var visited = [];
+  visited[vertexSource] = true;
+  while(queue.length) {
+    var vertex = queue.shift();
+    for(var i = 0; i < this.edges[vertex].length; i++) {
+      if(!visited[this.edges[vertex][i]]) {
+
+        visited[this.edges[vertex][i]] = true;
+        queue.push(this.edges[vertex][i]);
+      }
+    }
+  }
+  if(!visited[vertexDestination]) {
+    return false;
+  }
+  return true;
+};
+
 function canvasApp(){
 	if (!canvasSupport()) {
 			 return;
@@ -37,62 +167,52 @@ function canvasApp(){
 	drawBackground();
 	makeGrid();
 	defaultTriHex(triHex);
-	canvas = document.getElementById('hex0');
-	context = canvas.getContext('2d');
-	canvas.onmousedown = handleMouseDown;
-	canvas.onmouseup = handleMouseUp;
-	canvas.onmousemove = handleMouseMove;
 	drawScreen();
+	Player1.settlements = new Graph();
+	Player2.settlements = new Graph();
 }
 
-var hutStamp = {cenX: 90, cenY: 500,
-					dx: 90, dy: 500,
-					isDragging: false,
-					count: 80,
-					size: 10,
-					color: "#a07d49"};
-var towerStamp = {cenX: 180, cenY: 500,
-					dx: 180, dy: 500,
-					isDragging: false,
-					count: 8,
-					size: 15,
-					color: "#68a0aa"};
-//var templeStamp = { cenX: 180, cenY: 500,	isDragging: false, count: };
-
-function drawStamp(stamp) {
-	context.beginPath();
-	context.arc(stamp.dx, stamp.dy, stamp.size, 0, 2*Math.PI);
-	context.save();
-	context.fillStyle = stamp.color;
-	context.fill();
-	context.restore();
+function makeGrid() {
+	for(var j = 0; j < numRow; j++) { //COL numCol
+		for(var i = 0; i < numCol; i++) { //ROW numRow
+			var newHex = []; //EVEN rows if indexing from 0
+			makeHexPoints(newHex, i*size*Math.sqrt(3) + size, 3*j*size - size, size);
+			newHex.push({row: 2*j, col: i,
+				level: 1, type: -1,
+				cenX: i*size*Math.sqrt(3) + size,
+				cenY: 3*j*size - size,
+				rot: 0,
+				arrow: 0,
+				huts: 0,
+				towers: 0,
+				temples: 0,
+				player: 0});
+			//lmao im not putting flip cuz you don't need it after it's placed
+			hexGrid.push(newHex);
+		}
+		for(var i = 0; i < numCol; i++) { //ROW
+			newHex = []; //ODD rows
+			makeHexPoints(newHex, i*size*Math.sqrt(3) + 7, 3*j*size + size/2, size);
+			newHex.push({row: 2*j + 1, col: i,
+				level: 1, type: -1,
+				cenX: i*size*Math.sqrt(3) + 7,
+				cenY: 3*j*size + size/2,
+				rot: 0,
+				arrow: 0,
+				huts: 0,
+				towers: 0,
+				temples: 0,
+				player: 0});
+			hexGrid.push(newHex);
+		}
+	}
 }
-
-//my sad arrow is nothing but hardcoded points & rect
 function makeArrowPoints(arrowPoints, centerX, centerY) {
 	arrowPoints.push({x: 20, y: -5});
 	arrowPoints.push({x: 30, y: 5});
 	arrowPoints.push({x: 20, y: 15});
 	arrowPoints.push({x: 0, y: 5, l: 20, w: 10})
 }
-//outline & fill arrow
-function drawArrow(arrow, rotation, centerX, centerY){
-	context.fillStyle = "black";
-	context.save();
-	context.translate(centerX, centerY);
-	context.rotate(Math.PI / 6 + rotation*(45) + 0.5);
-
-	context.fillRect(0, 0, arrow[3].l, arrow[3].w);
-	context.beginPath();
-	context.moveTo(arrow[0].x, arrow[0].y);
-	context.lineTo(arrow[1].x, arrow[1].y);
-	context.lineTo(arrow[2].x, arrow[2].y);
-	context.lineTo(arrow[0].x, arrow[0].y);
-	context.closePath();
-	context.fill();
-	context.restore();
-}
-//makes the 6 points for a single hex, pushes to array
 function makeHexPoints(hexPoints, centerX, centerY, size){
 	for(var i = 0; i < 6; i++) {
 		var angle_rad = Math.PI/180 * (60 * i + 30);
@@ -102,8 +222,9 @@ function makeHexPoints(hexPoints, centerX, centerY, size){
 		});
 	}
 }
-//makes a default trio
 function defaultTriHex(triHex){
+	//helper for handleMouseUp in resetting trihex position, no color change
+
 	var hexUp = [];
 	var hexLeft = [];
 	var hexRight = [];
@@ -112,9 +233,9 @@ function defaultTriHex(triHex){
 	makeHexPoints(hexLeft, 0, 0, size);
 	makeHexPoints(hexRight, 0, 0, size);
 
-	hexUp.push({row: -1,	col: -1,	level: 1, type: 5, cenX: 0, cenY: 0, transpOn: false, rot: 0, flip: 1, arrow: 0});
-	hexLeft.push({row: -1, col: -1, level: 1, type: -1, cenX: 0, cenY: 0, transpOn: false, rot: 0, flip: 1, arrow: 0});
-	hexRight.push({row: -1, col: -1, level: 1, type: -1, cenX: 0, cenY: 0, transpOn: false, rot: 0, flip: 1, arrow: 0});
+	hexUp.push({row: -1,	col: -1,	level: 1, type: 5, cenX: 0, cenY: 0, rot: 0, flip: 1, arrow: 0});
+	hexLeft.push({row: -1, col: -1, level: 1, type: -1, cenX: 0, cenY: 0, rot: 0, flip: 1, arrow: 0});
+	hexRight.push({row: -1, col: -1, level: 1, type: -1, cenX: 0, cenY: 0, rot: 0, flip: 1, arrow: 0});
 
 	goToCoords(1, 4, hexUp);
 	goToCoords(1, 5, hexLeft);
@@ -132,42 +253,47 @@ function defaultTriHex(triHex){
 					rotation: 0,
 					arrow: 0,
 					shadowOn: true,
-					conflictOn: false});
+					conflictOn: false,
+					transpOn: false});
 }
-//allows hex to be referenced by coordinates
-function makeGrid() {
-	for(var i = 0; i < numCol; i++) { //COL
-		for(var j = 0; j < numRow; j++) { //ROW
-			var newHex = []; //EVEN rows if indexing from 0
-			makeHexPoints(newHex, i*size*Math.sqrt(3) + size, 3*j*size - size, size);
-			newHex.push({row: 2*j, col: i,
-				level: 1, type: -1,
-				cenX: i*size*Math.sqrt(3) + size,
-				cenY: 3*j*size - size,
-				transpOn: false,
-				rot: 0,
-				arrow: 0,
-				huts: 0,
-				towers: 0});
-			//lmao im not putting flip cuz you don't need it after it's placed
-			hexGrid.push(newHex);
-			newHex = []; //ODD rows
-			makeHexPoints(newHex, i*size*Math.sqrt(3) + size/10, 3*j*size + size/2, size);
-			newHex.push({row: 2*j + 1, col: i,
-				level: 1, type: -1,
-				cenX: i*size*Math.sqrt(3) + size/10,
-				cenY: 3*j*size + size/2,
-				transpOn: false,
-				rot: 0,
-				arrow: 0,
-				huts: 0,
-				towers: 0});
-			hexGrid.push(newHex);
-		}
+function resetTriHex() {
+	goToCoords(1, 4, triHex[0]);
+	goToCoords(1, 5, triHex[1]);
+	goToCoords(2, 5, triHex[2]);
+	triHex[4].rotation = 0;
+	triHex[4].flip = 1;
+	for(var k = 0; k < 3; k++) {
+		triHex[k][6].rot = 0;
+		triHex[k][6].flip = 1;
+		triHex[k][6].arrow = 0;
 	}
+	triHex[4].isDragging = false;
+	triHex[4].shadowOn = false;
+	triHex[4].conflictOn = false;
+	triHex[4].transpOn = false;
 }
-//outline & stroke for grid, TO-DO: eventually should be invisible
-//TO-DO: if the type is not -1 then draw the outline and color
+
+function drawStamp(stamp) {
+	var player = currPlayer == 1 ? Player1 : Player2;
+	context.beginPath();
+	context.arc(stamp.dx, stamp.dy, stamp.size, 0, 2*Math.PI);
+	context.save();
+	context.fillStyle = player.color;
+	context.fill();
+	context.restore();
+}
+function drawTempleStamp(stamp) {
+	var player = currPlayer == 1 ? Player1 : Player2;
+	context.beginPath();
+	context.moveTo(stamp.dx, stamp.dy);
+	context.lineTo(stamp.dx + 15, stamp.dy + 30);
+	context.lineTo(stamp.dx - 15, stamp.dy + 30);
+	context.lineTo(stamp.dx, stamp.dy);
+	context.save();
+	context.fillStyle = player.color;
+	context.fill();
+	context.restore();
+}
 function drawGrid() {
 	for(var i = 0; i < hexGrid.length; i++) {
 		outlineHex(hexGrid[i]);
@@ -177,197 +303,258 @@ function drawGrid() {
 		//context.stroke();
 	}
 }
+function drawBackground() {
+	context.save();
+	context.fillStyle = Player1.color;
+	context.fillRect(30, 100, 100, 30);
+	context.fillStyle = Player2.color;
+	context.fillRect(150, 100, 100, 30);
+	context.strokeStyle = "white";
+	if(currPlayer == 1){
+		context.strokeRect(30, 100, 100, 30);
+		context.fillStyle = Player1.color;
+	} else{
+		context.strokeRect(150, 100, 100, 30);
+		context.fillStyle = Player2.color;
+	}
+	context.font = "16px Lucida Console";
+	context.fillText("T A L U V A", 85, 40);
+	context.fillText("T A L U V A", 85, 70);
+	context.fillStyle = "white";
+	context.fillText("T A L U V A", 85, 55);
 
-//moves hex to a certain coordinate
-function goToCoords(col, row, hex) {
-	for(var i = 0; i < hexGrid.length; i ++) {
-		if(hexGrid[i][6].row == row && hexGrid[i][6].col == col) {
-			var backHex = hexGrid[i];
-			for(var k = 0; k < 6; k++) {
-				hex[k].x = backHex[k].x;
-				hex[k].y = backHex[k].y;
-			}
-			hex[6].row = row;
-			hex[6].col = col;
-			hex[6].cenX = backHex[6].cenX;
-			hex[6].cenY = backHex[6].cenY;
-			break;
-		}
+	var player = (currPlayer == 1) ? Player1 : Player2;
+	context.fillStyle = "white";
+	if(player.placedTile && !player.placedBuilding){
+		context.fillText("Step 2: Place a building", 25, 490);
+		context.fillText("--- or ---", 90, 625);
+	}else{
+		context.fillText("Step 1: Place a tile", 45, 180);
+	}
+
+	context.fillStyle = "white";
+	context.fillText(`${Player1.id}`, 40, 120);
+	context.fillText(`${Player2.id}`, 160, 120);
+	context.restore();
+
+	drawStamp(hutStamp); //hut button
+	drawStamp(towerStamp); //tower button
+	drawTempleStamp(templeStamp);
+	context.save();
+	context.fillStyle = "white";
+	context.textAlign = "center";
+	context.font = "16px Lucida Console";
+	context.fillText("Press 'r' to rotate.", 140, 430);
+	context.fillText(`Terrain Tiles (${count})`, 140, 410);
+	//context.fillText(count, 140, 180);
+	var player = currPlayer == 1 ? Player1 : Player2;
+	context.fillText("Hut", 60, 565);
+	context.fillText(`(${20 - player.numHuts})`, 60, 585);
+	context.fillText("Tower", 140, 565);
+	context.fillText(`(${2 - player.numTowers})`, 140, 585);
+	context.fillText("Temple", 220, 565);
+	context.fillText(`(${3 - player.numTemples})`, 220, 585);
+	context.restore();
+	drawExpansion(); //expansion button
+}
+function drawTriangles() {
+	var leftAdjust = 310;
+	var topAdjust = 20;
+	var spacing = 60;
+	for(var i = 0; i < 17; i++){
+		context.beginPath();
+		context.moveTo(i*spacing + leftAdjust, topAdjust);
+		context.lineTo(i*spacing + 15 + leftAdjust, 30 + topAdjust);
+		context.lineTo(i*spacing - 15 + leftAdjust, 30 + topAdjust);
+		context.lineTo(i*spacing + leftAdjust, topAdjust);
+		context.save();
+		context.fillStyle = "#d6a181";
+		context.fill();
+		context.restore();
+	}
+	leftAdjust = 325;
+	for(var i = 0; i < 16; i++){
+		context.beginPath();
+		context.moveTo(i*spacing + leftAdjust, topAdjust);
+		context.lineTo(i*spacing + 30 + leftAdjust, topAdjust);
+		context.lineTo(i*spacing + 15 + leftAdjust, 30 + topAdjust);
+		context.lineTo(i*spacing + leftAdjust, topAdjust);
+		context.save();
+		context.fillStyle = "#9ea57e";
+		context.fill();
+		context.restore();
+	}
+	topAdjust = 750;
+	leftAdjust = 310;
+	for(var i = 0; i < 17; i++){
+		context.beginPath();
+		context.moveTo(i*spacing + leftAdjust, topAdjust);
+		context.lineTo(i*spacing + 15 + leftAdjust, 30 + topAdjust);
+		context.lineTo(i*spacing - 15 + leftAdjust, 30 + topAdjust);
+		context.lineTo(i*spacing + leftAdjust, topAdjust);
+		context.save();
+		context.fillStyle = "#9ea57e";
+		context.fill();
+		context.restore();
+	}
+	leftAdjust = 325;
+	for(var i = 0; i < 16; i++){
+		context.beginPath();
+		context.moveTo(i*spacing + leftAdjust, topAdjust);
+		context.lineTo(i*spacing + 30 + leftAdjust, topAdjust);
+		context.lineTo(i*spacing + 15 + leftAdjust, 30 + topAdjust);
+		context.lineTo(i*spacing + leftAdjust, topAdjust);
+		context.save();
+		context.fillStyle = "#bca371";
+		context.fill();
+		context.restore();
 	}
 }
-
-function getHexAtCoords(col, row) {
-	for(var i = 0; i < hexGrid.length; i ++) {
-		if(hexGrid[i][6].row == row && hexGrid[i][6].col == col) {
-			return hexGrid[i];
-		}
+function drawScreen() {
+	context.clearRect(0, 0, canvas.width, canvas.height);
+	context.fillStyle="#b6cca1";
+	context.fillRect(0,0,1300,800);
+	drawGrid();
+	context.fillStyle="#202221";
+	context.fillRect(0,0,280,800);
+	drawBackground();
+	drawTriangles();
+	if(triHex[4].rotation % 2 == 0) {
+		drawHex(triHex[0]);
+		drawHex(triHex[1]);
+		drawHex(triHex[2]);
+	} else {
+		drawHex(triHex[1]);
+		drawHex(triHex[0]);
+		drawHex(triHex[2]);
 	}
 }
-
-//check for hut & tower conflicts, update hut/tower param in trihex if it's ok
-function updateHut(backHex){
-	if(hutStamp.dx != hutStamp.cenX){
-		if(backHex[6].level == 1 && backHex[6].type != -1){
-			if(backHex[6].type == 5){
-				window.alert("You may not build a hut on a volcano.")
-			} else{
-				backHex[6].huts++;
-				hutStamp.count--;
-			}
-		} else{
-			window.alert("You may only build huts on a L1 terrain field.")
+function drawHex(hex) {
+	context.shadowBlur = 0;
+	context.shadowOffsetX = 0;
+	context.shadowOffsetY = 0;
+	context.globalAlpha = 1.0;
+	context.strokeStyle = "white";
+	context.lineWidth = 2;
+	context.save();
+	if(hex == triHex[0] || hex == triHex[1] || hex == triHex[2]) {
+		if(triHex[4].shadowOn) { //shadow only on mousedown
+			context.shadowBlur = 20;
+			context.shadowColor = "black";
+			context.shadowOffsetX = 10;
+			context.shadowOffsetY = 10;
+		}
+		if(triHex[4].transpOn) { //transparency during overlap
+			context.globalAlpha = 0.4;
+		}
+		if(triHex[4].conflictOn) {	//red warning outline
+			context.strokeStyle = "red";
+			context.lineWidth = 3;
 		}
 	}
-}
-
-function updateTower(backHex){
-	if(towerStamp.dx != towerStamp.cenX){
-		if(backHex[6].level >= 3){
-			//AND MUST BE ADJACENT TO settlement
-			//TO-DO: checkSurroundTiles for adjacency with another built settlement
-			if(backHex[6].type == 5) {
-				window.alert("You may not build a tower on a volcano.")
-			} else if (backHex[6].towers != 0) {
-				window.alert("You already built a tower here.")
+	outlineHex(hex);
+	context.fillStyle = colorTile(hex[6].type);
+	context.fill();
+	context.globalAlpha = 1.0;
+	context.stroke();
+	context.restore();
+	if(hex[6].type == 5){ //AKA IT IS A VOLCANO
+		var arrowPoints = [];
+		makeArrowPoints(arrowPoints, hex[6].cenX, hex[6].cenY);
+		drawArrow(arrowPoints, hex[6].arrow, hex[6].cenX, hex[6].cenY);
+	}
+	if(hex != triHex[0] && hex != triHex[1] && hex != triHex[2]) {
+		context.save();
+		context.textAlign = "center";
+		context.fillStyle = "black";
+		context.font = "16px Lucida Console";
+		context.fillText(`L${hex[6].level}`, hex[6].cenX, hex[6].cenY - 20);
+		context.fillText(`${hex[6].row * numRow + hex[6].col}`, hex[6].cenX, hex[6].cenY);
+		//draws huts & tower stamps onto the hex
+		if(hex[6].huts > 0){
+			context.beginPath();
+			context.arc(hex[6].cenX, hex[6].cenY + 10, hutStamp.size, 0, 2*Math.PI);
+			if(hex[6].player == 1){
+				context.fillStyle = Player1.color;
 			} else {
-				backHex[6].towers++;
-				towerStamp.count--;
+				context.fillStyle = Player2.color;
 			}
-		} else {
-			window.alert("You may only build a single tower on a L3 or higher terrain field.")
+			context.fill();
+			context.fillStyle = "white";
+			context.strokeStyle = "white";
+			context.stroke();
+			context.fillText(`${hex[6].huts}`, hex[6].cenX, hex[6].cenY + 15);
+			context.closePath();
 		}
+		if(hex[6].towers > 0){
+			context.beginPath();
+			context.arc(hex[6].cenX, hex[6].cenY + 10, towerStamp.size, 0, 2*Math.PI);
+			if(hex[6].player == 1){
+				context.fillStyle = Player1.color;
+			} else {
+				context.fillStyle = Player2.color;
+			}
+			context.fill();
+			context.strokeStyle = "white";
+			context.stroke();
+			context.closePath();
+		}
+		if(hex[6].temples > 0){
+			context.beginPath();
+			context.moveTo(hex[6].cenX, hex[6].cenY - 10);
+			context.lineTo(hex[6].cenX + 15, hex[6].cenY + 20);
+			context.lineTo(hex[6].cenX - 15, hex[6].cenY + 20);
+			context.lineTo(hex[6].cenX, hex[6].cenY - 10);
+			if(hex[6].player == 1){
+				context.fillStyle = Player1.color;
+			} else {
+				context.fillStyle = Player2.color;
+			}
+			context.fill();
+			context.strokeStyle = "white";
+			context.stroke();
+			context.closePath();
+		}
+		context.restore();
+	}
+	if(gameOver){
+		endGame();
 	}
 }
-
-//basically only checks that the tiles around it are not empty
-//TO-DO: ahaha there's definitely still something wrong
-function checkPlacementConflict(hex) {
-	var coordsE = [{r: 0, c: -1}, {r: -1, c: 0}, {r: -1, c: 1},
-					{r: 0, c: 1}, {r: 1, c: 1}, {r: 1, c: 0}];
-	var coordsO = [{r: 0, c: -1}, {r: -1, c: -1}, {r: -1, c: 0},
-					{r: 0, c: 1}, {r: 1, c: 0}, {r: 1, c: -1}];
-	//console.log("checking: ", hex[6].row, hex[6].col);
-	for(var k = 0; k < 3; k++){
-		hex = triHex[k];
-		for(var i = 0; i < hexGrid.length; i++) {
-			for(var j = 0; j < coordsE.length; j++) {
-				if(hexGrid[i][6].row % 2 == 0){
-					if((hexGrid[i][6].row == coordsE[j].r + hex[6].row) &&
-						(hexGrid[i][6].col == coordsE[j].c + hex[6].col)) {
-						if(hexGrid[i][6].type != -1){
-							return true;
-						}
-					}
-				} else {
-					if((hexGrid[i][6].row == coordsO[j].r + hex[6].row) &&
-						(hexGrid[i][6].col == coordsO[j].c + hex[6].col)) {
-						if(hexGrid[i][6].type != -1){
-							return true;
-						}
-					}
-				}
-			}
-		}
+function outlineHex(hex){
+	context.beginPath();
+	context.moveTo(hex[0].x, hex[0].y);
+	for(var i = 1; i < 6; i++){
+		context.lineTo(hex[i].x, hex[i].y);
 	}
-	window.alert("You must connect your tile to already placed tiles.");
-	return false;
+	context.lineTo(hex[0].x, hex[0].y);
+	context.closePath();
 }
+function drawArrow(arrow, rotation, centerX, centerY){
+	context.fillStyle = "black";
+	context.save();
+	context.translate(centerX, centerY);
+	context.rotate(Math.PI / 6 + rotation*(45) + 0.5);
 
-function checkEvenGroundConflict(coords) {
-	var levelConflict = false;
-	var conflict = 0;
-	//no free space underneath AKA EVEN GROUND
-	//aka all should start out at level 0
-
-	//find level of each hexGrid
-	var hex1 = getHexAtCoords(coords[0].c, coords[0].r);
-	var hex2 = getHexAtCoords(coords[1].c, coords[1].r);
-	var hex3 = getHexAtCoords(coords[2].c, coords[2].r);
-
-	if(hex1[6].level != hex2[6].level ||
-		hex2[6].level != hex3[6].level ||
-		hex3[6].level != hex1[6].level) {
-		levelConflict = true;
-	}
-
-	for(var i = 0; i < hexGrid.length; i ++) {
-		for(var j = 0; j < coords.length; j ++) {
-			if(hexGrid[i][6].row == coords[j].r && hexGrid[i][6].col == coords[j].c){
-				if(hexGrid[i][6].type != -1) {
-					conflict++;
-				}
-			}
-		}
-	}
-	if(conflict == 1 || conflict == 2 || levelConflict) {
-		window.alert("You must place your tile on even ground.");
-		return false;
-	}
-	return true; //check?????3
+	context.fillRect(0, 0, arrow[3].l, arrow[3].w);
+	context.beginPath();
+	context.moveTo(arrow[0].x, arrow[0].y);
+	context.lineTo(arrow[1].x, arrow[1].y);
+	context.lineTo(arrow[2].x, arrow[2].y);
+	context.lineTo(arrow[0].x, arrow[0].y);
+	context.closePath();
+	context.fill();
+	context.restore();
 }
-
-function checkVolcanoConflict(coords) {
-	for(var i = 0; i < coords.length; i++){
-		var hex = getHexAtCoords(coords[i].c, coords[i].r);
-		for(var k = 0; k < 3; k++){
-			if(triHex[k][6].type == 5 && triHex[k][6].col == hex[6].col &&
-				triHex[k][6].row == hex[6].row){
-				if(hex[6].type == 5){
-					if(hex[6].arrow == triHex[k][6].arrow){
-						window.alert("You cannot stack a volcano on another volcano of the same direction.");
-						return false;
-					}
-				}
-				else if(hex[6].type != -1){
-					window.alert("You must stack a volcano on top of another volcano.");
-					return false;
-				}
-			}
-		}
-	}
-	return true;
-}
-
-function checkConflicts(){
-	//< ---- EXPAND THE LANDSCAPE: ---- >
-	//TO-DO: check that it is connected with tiles already placed
-	var placement = true;
-	var volcano = true;
-	var evenGround = true;
-	var coords = [{c: triHex[0][6].col, r: triHex[0][6].row},
-					  {c: triHex[1][6].col, r: triHex[1][6].row},
-					  {c: triHex[2][6].col, r: triHex[2][6].row}];
-
-	if(!firstTilePlacement){
-		//console.log("im ready");
-		//TO-DO: FOR A SECOND IT WASN'T WORKING, PLS DOUBLECHECK
-		placement = checkPlacementConflict();
-		volcano = checkVolcanoConflict(coords);
-		evenGround = checkEvenGroundConflict(coords);
-	}
-
-	if(placement && volcano && evenGround){
-		triHex[4].conflictOn = false;
-		for(var k = 0; k < 3; k++) {
-			triHex[k][6].transpOn = false;
-		}
-		return true;
-	}
-	triHex[4].conflictOn = true;
-	for(var k = 0; k < 3; k++) {
-		triHex[k][6].transpOn = true;
-	}
-	return false; //isAllowed var in handleMouseUp
-
-	//< ---- VULCANIC ERUPTION ---- >
-	//TO-DO: check that V on V has different direction
-	//TO-DO: check that tile stacks are V on V tho
-	//checkVolcanoConflict(c1, r1, c2, r2, c3, r3)
-	//TO-DO: no free space underneath AKA EVEN GROUND aka all should start out at level 0
-	//checkEvenGroundConflict(c1, r1, c2, r2, c3, r3)
-	//TO-DO: covered huts are returned
-	//TO-DO: no covering of temples/towers
-	//no covering of complete settlements (???)
+function drawExpansion(){
+	context.save();
+	context.fillStyle = currPlayer == 1 ? Player1.color : Player2.color;
+	context.fillRect(50, 650, 180, 35);
+	context.fillStyle = "white";
+	context.shadowColor = "transparent";
+	context.font = "16px Lucida Console";
+	context.fillText("Expand Settlement", 60, 672);
+	context.restore();
 }
 
 var tilePatterns = [[0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4],
@@ -400,109 +587,6 @@ function randTileStack(triHex) {
 		count--;
 	}
 }
-//draws individual triHex and background
-function drawBackground() {
-	var grad = context.createLinearGradient(0,0,0,200);
-	grad.addColorStop(0,"#c1cfda");
-	grad.addColorStop(1,"#20a4f3");
-	context.fillStyle="#d3ffe9";
-	context.fillRect(0,0,1000,700);
-	context.fillStyle="#03191e";
-	context.fillRect(0,0,280,700);
-	drawGrid();
-	context.font = "28px Lucida Console";
-	context.fillStyle = "white";
-	context.fillText("Player 1's Turn", 10, 50);
-	context.font = "15px Lucida Console";
-	if(count > 0){
-		context.fillText("remaining:", 80, 180);
-		context.fillText(count, 180, 180);
-	} else {
-		context.fillText("Game Over!", 10, 100);
-	}
-}
-//does all the draws for hex and arrows at once
-function drawScreen() {
-	context.clearRect(0, 0, canvas.width, canvas.height);
-	drawBackground(); //redraws the newly painted tiles if placed
-	if(triHex[4].rotation % 2 == 0) {
-		drawHex(triHex[0]);
-		drawHex(triHex[1]);
-		drawHex(triHex[2]);
-	} else {
-		drawHex(triHex[1]);
-		drawHex(triHex[0]);
-		drawHex(triHex[2]);
-	}
-	//TO-DO: draw hut and tower markers hehehe
-	drawStamp(hutStamp);
-	drawStamp(towerStamp);
-	context.save();
-	context.fillStyle = "white";
-	context.fillText("Hut", 80, 530);
-	context.fillText("Tower", 160, 530);
-	context.restore();
-}
-//shadows & fills
-function drawHex(hex) {
-	context.shadowBlur = 0;
-	context.shadowOffsetX = 0;
-	context.shadowOffsetY = 0;
-	context.globalAlpha = 1.0;
-	context.strokeStyle = "white";
-	context.lineWidth = 2;
-	if(hex == triHex[0] || hex == triHex[1] || hex == triHex[2]) {
-		if(triHex[4].shadowOn) { //shadow only on mousedown
-			context.shadowBlur = 20;
-			context.shadowColor = "black";
-			context.shadowOffsetX = 10;
-			context.shadowOffsetY = 10;
-		}
-		if(hex[6].transpOn) { //transparency during overlap
-			context.globalAlpha = 0.5;
-		}
-		if(triHex[4].conflictOn) {	//red warning outline
-			context.strokeStyle = "red";
-			context.lineWidth = 3;
-		}
-	}
-	outlineHex(hex);
-	context.fillStyle = colorTile(hex[6].type);
-	context.fill();
-	context.globalAlpha = 1.0;
-	context.stroke();
-	if(hex[6].type == 5){ //AKA IT IS A VOLCANO
-		var arrowPoints = [];
-		makeArrowPoints(arrowPoints, hex[6].cenX, hex[6].cenY);
-		drawArrow(arrowPoints, hex[6].arrow, hex[6].cenX, hex[6].cenY);
-	}
-	if(hex != triHex[0] && hex != triHex[1] && hex != triHex[2]) {
-		context.save();
-		context.textAlign = "center";
-		context.fillStyle = "black";
-		context.fillText(`L${hex[6].level}`, hex[6].cenX, hex[6].cenY - 20);
-		if(hex[6].huts > 0){
-			context.beginPath();
-			context.arc(hex[6].cenX - 20, hex[6].cenY, hutStamp.size, 0, 2*Math.PI);
-			context.fillStyle = hutStamp.color;
-			context.fill();
-			context.fillStyle = "white";
-			context.fillText(`${hex[6].huts}`, hex[6].cenX - 20, hex[6].cenY + 5);
-			context.closePath();
-		}
-		if(hex[6].towers > 0){
-			context.beginPath();
-			context.arc(hex[6].cenX + 20, hex[6].cenY, towerStamp.size, 0, 2*Math.PI);
-			context.fillStyle = towerStamp.color;
-			context.fill();
-			context.fillStyle = "white";
-			context.fillText(`${hex[6].towers}`, hex[6].cenX + 20, hex[6].cenY + 5);
-			context.closePath();
-		}
-		context.restore();
-	}
-}
-//color picker
 function colorTile(color) {
 		if(color == 0) return 'rgba(0, 100, 0, 255)';				//jungle
 		else if(color == 1) return 'rgba(0, 225, 0, 255)';			//grass
@@ -511,35 +595,740 @@ function colorTile(color) {
 		else if(color == 4) return 'rgba(0, 191, 255, 255)';		//lagoon
 		else if(color == 5) return 'rgba(255, 48, 48, 255)';		//volcano
 	}
-//traces outline only (sans stroke)
-function outlineHex(hex){
-	context.beginPath();
-	context.moveTo(hex[0].x, hex[0].y);
-	for(var i = 1; i < 6; i++){
-		context.lineTo(hex[i].x, hex[i].y);
-	}
-	context.lineTo(hex[0].x, hex[0].y);
-	context.closePath();
-}
-//helper function for FLIP key press
 function swapColors(a, b){
 	var temp = triHex[a][6].type;
 	triHex[a][6].type = triHex[b][6].type;
 	triHex[b][6].type = temp;
 }
 
+function getSurrSettlements(hex) {
+	var coordsE = [{r: 0, c: -1}, {r: -1, c: -1}, {r: -1, c: 0},
+					{r: 0, c: 1}, {r: 1, c: 0}, {r: 1, c: -1}];
+	var coordsO = [{r: 0, c: -1}, {r: -1, c: 0}, {r: -1, c: 1},
+					{r: 0, c: 1}, {r: 1, c: 1}, {r: 1, c: 0}];
+	var graph = (currPlayer == 1) ? Player1.settlements : Player2.settlements;
+
+	var surrCoords = (hex[6].row % 2 == 0) ? coordsO : coordsE;
+	var surrSets = [];
+
+	for(var i = 0; i < surrCoords.length; i++){
+		var nRow = hex[6].row + surrCoords[i].r;
+		var nCol = hex[6].col + surrCoords[i].c;
+		var neighbor = nRow * numRow + nCol;
+		console.log(neighbor, graph.BFS(neighbor));
+		if(graph.BFS(neighbor) != 0){ //aka it exists
+			surrSets.push(neighbor);
+		}
+	}
+	return surrSets;
+}
+function addHut(hex) {
+	var surrSets = getSurrSettlements(hex);
+	console.log("hhhhhh");
+	console.log(hex);
+	//surrSets contains all neighbors in ## format
+	var hexID = hex[6].row * numRow + hex[6].col;
+	var graph = (currPlayer == 1) ? Player1.settlements : Player2.settlements;
+	graph.addVertex(hexID);
+	while(surrSets.length != 0){
+		//add edges
+		var neighborID = surrSets.pop();
+		graph.addEdge(neighborID, hexID);
+		console.log("adding edge");
+	}
+}
+function addTower(hex) {
+	var surrSets = getSurrSettlements(hex);
+	var player = (currPlayer == 1) ? Player1 : Player2;
+	var graph = player.settlements;
+	if(surrSets.length == 0){
+		window.alert("You must place your tower adjacent to at least one of your settlements.");
+		return;
+	}
+	for(var i = 0; i < surrSets.length; i++){
+		var hasTower = graph.pathFromTo(surrSets[i], -2);
+		if(hasTower){
+			window.alert("You already built a tower in this settlement.");
+			return;
+		}
+		if(player.numTowers > 0){
+			hasTower = graph.pathFromTo(surrSets[i], -4);
+			if(hasTower){
+				window.alert("You already built a tower in this settlement.");
+				return;
+			}
+		}
+		//do it for both 1 and 2 towers, depending on player.numTowers
+	}
+	var hexID = hex[6].row * numRow + hex[6].col;
+	graph.addVertex(hexID);
+	if(player.numTowers == 0){
+		graph.addVertex(-2);
+		graph.addEdge(hexID, -2);
+	} else if(player.numTowers == 1){
+		graph.addVertex(-4);
+		graph.addEdge(hexID, -4);
+	}
+	for(var i = 0; i < surrSets.length; i++){
+		graph.addEdge(hexID, surrSets[i]);
+	}
+	hex[6].player = currPlayer;
+	hex[6].towers++;
+	player.numTowers++;
+	player.placedBuilding = true;
+}
+function addTemple(hex) {
+	var surrSets = getSurrSettlements(hex);
+	var player = (currPlayer == 1) ? Player1 : Player2;
+	var graph = player.settlements;
+	if(surrSets.length == 0){
+		window.alert("You must place your temple adjacent to a settlement of at least three fields.");
+		return;
+	}
+	var numFields = 0;
+	var isQualified = false;
+	for(var i = 0; i < surrSets.length; i++){
+		var hasTower;
+		var indexAdjust = 0;
+		if(player.numTowers > 0){
+			hasTower = graph.pathFromTo(surrSets[i], -2);
+			if(hasTower){
+				indexAdjust = 1;
+			}
+			if(player.numTowers > 1){
+				hasTower = graph.pathFromTo(surrSets[i], -4);
+				if(hasTower){
+					indexAdjust = 1;
+				}
+			}
+		}
+		numFields = graph.BFS(surrSets[i]) - indexAdjust;
+		console.log(numFields);
+		if(numFields >= 3){
+			isQualified = true;
+		}
+	}
+	if(!isQualified){
+		window.alert("You must place your temple adjacent to a settlement of at least three fields.");
+		return;
+	}
+	var err = false;
+	for(var i = 0; i < surrSets.length; i++){
+		var hasTemple = graph.pathFromTo(surrSets[i], -3);
+		if(hasTemple){
+			console.log("-3");
+			err = true;
+		}
+		if(player.numTemples > 0){
+			hasTemple = graph.pathFromTo(surrSets[i], -6);
+			if(hasTemple){
+				console.log("-6");
+				err = true;
+			}
+			if(player.numTemples > 1){
+				hasTemple = graph.pathFromTo(surrSets[i], -9);
+				if(hasTemple){
+					console.log("-9");
+					err = true;
+				}
+			}
+		}
+		if(err){
+			window.alert("You already built a temple in this settlement.");
+			return;
+		}
+	}
+	var hexID = hex[6].row * numRow + hex[6].col;
+	graph.addVertex(hexID);
+	if(player.numTemples == 0){
+		graph.addVertex(-3);
+		graph.addEdge(hexID, -3);
+	} else if(player.numTemples == 1){
+		graph.addVertex(-6);
+		graph.addEdge(hexID, -6);
+	} else if(player.numTemples == 2){
+		graph.addVertex(-9);
+		graph.addEdge(hexID, -9);
+	}
+	for(var i = 0; i < surrSets.length; i++){
+		graph.addEdge(hexID, surrSets[i]);
+	}
+	hex[6].player = currPlayer;
+	hex[6].temples++;
+	player.numTemples++;
+	player.placedBuilding = true;
+}
+function updateHut(backHex){
+	var player = currPlayer == 1 ? Player1 : Player2;
+	if(hutStamp.dx != hutStamp.cenX){
+		if(backHex[6].level == 1 && backHex[6].type != -1){
+			if(backHex[6].type == 5){
+				window.alert("You may not build a hut on a volcano.")
+			} else if(backHex[6].huts > 0 || backHex[6].towers > 0 || backHex[6].temples > 0){
+				window.alert("You may only build a hut on an empty terrain.")
+			} else{
+				backHex[6].player = currPlayer;
+				backHex[6].huts++;
+				hutStamp.count--;
+				addHut(backHex); //to graph
+				player.numHuts++;
+				player.placedBuilding = true;
+			}
+		} else{
+			window.alert("You may only build huts on a L1 terrain field.")
+		}
+	}
+}
+function checkValidHut(backHex){
+	var player = currPlayer == 1 ? Player1 : Player2;
+	if(backHex[6].level == 1 && backHex[6].type != -1){
+		if(backHex[6].type == 5){
+			return false;
+		} else if(backHex[6].huts > 0 || backHex[6].towers > 0 || backHex[6].temples > 0){
+			return false;
+		} else if(player.numHuts == 20){
+			return false;
+		} else{
+			return true;
+		}
+	} else{
+		return false;
+	}
+}
+function updateTower(backHex){
+	var player = currPlayer == 1 ? Player1 : Player2;
+	if(towerStamp.dx != towerStamp.cenX){
+		if(backHex[6].level >= 2){ //bleh TO-DO: change
+			if(backHex[6].type == 5){
+				window.alert("You may not build a tower on a volcano.");
+			} else if (backHex[6].towers != 0){
+				window.alert("There's already a tower here.");
+			} else if (backHex[6].temples != 0){
+				window.alert("Excuse me sir, you can't put a tower on a temple!! Where's the respect??");
+			} else if (backHex[6].huts != 0){
+				window.alert("A tower would crush a hut completely, rendering it useless. Is that what you want?");
+			} else{
+				addTower(backHex);
+			}
+		} else{
+			window.alert("You may only build a single tower on a L3 or higher terrain field.");
+		}
+	}
+}
+function checkValidTower(backHex){
+	var player = currPlayer == 1 ? Player1 : Player2;
+	if(backHex[6].level >= 2){ //bleh TO-DO: change
+		if(backHex[6].type == 5){
+			return false;
+		} else if (backHex[6].towers != 0){
+			return false;
+		} else if (backHex[6].temples != 0){
+			return false;
+		} else if (backHex[6].huts != 0){
+			return false;
+		} else{
+			var surrSets = getSurrSettlements(hex);
+			var graph = player.settlements;
+			if(surrSets.length == 0){
+				return false;
+			}
+			for(var i = 0; i < surrSets.length; i++){
+				var hasTower = graph.pathFromTo(surrSets[i], -2);
+				if(hasTower){
+					return false;
+				}
+				if(player.numTowers > 0){
+					hasTower = graph.pathFromTo(surrSets[i], -4);
+					if(hasTower){
+						return false;
+					}
+				}
+			}
+		}
+	} else{
+		return false;
+	}
+}
+function updateTemple(backHex){
+	var player = currPlayer == 1 ? Player1 : Player2;
+	if(templeStamp.dx != templeStamp.cenX){
+		if(backHex[6].type == 5){
+			window.alert("You may not build a temple on a volcano.");
+		} else if (backHex[6].temples != 0){
+			window.alert("There's already a temple here.");
+		} else if (backHex[6].huts != 0){
+			window.alert("There's a hut here!!! What are you doing.");
+		} else if (backHex[6].towers != 0){
+			window.alert("There's a tower here. Now you're just testing me.");
+		} else{
+			addTemple(backHex);
+		}
+	}
+}
+function checkValidTemple(backHex){
+	var player = currPlayer == 1 ? Player1 : Player2;
+	if(templeStamp.dx != templeStamp.cenX){
+		if(backHex[6].type == 5){
+			return false;
+		} else if (backHex[6].temples != 0){
+			return false;
+		} else if (backHex[6].huts != 0){
+			return false;
+		} else if (backHex[6].towers != 0){
+			return false;
+		} else{
+			var surrSets = getSurrSettlements(backHex);
+			var graph = player.settlements;
+			if(surrSets.length == 0){
+				return false;
+			}
+			var numFields = 0;
+			var isQualified = false;
+			for(var i = 0; i < surrSets.length; i++){
+				var hasTower;
+				var indexAdjust = 0;
+				if(player.numTowers > 0){
+					hasTower = graph.pathFromTo(surrSets[i], -2);
+					if(hasTower){
+						indexAdjust = 1;
+					}
+					if(player.numTowers > 1){
+						hasTower = graph.pathFromTo(surrSets[i], -4);
+						if(hasTower){
+							indexAdjust = 1;
+						}
+					}
+				}
+				numFields = graph.BFS(surrSets[i]) - indexAdjust;
+				if(numFields >= 3){
+					isQualified = true;
+				}
+			}
+			if(!isQualified){
+				return false;
+			}
+			var err = false;
+			for(var i = 0; i < surrSets.length; i++){
+				var hasTemple = graph.pathFromTo(surrSets[i], -3);
+				if(hasTemple){
+					err = true;
+				}
+				if(player.numTemples > 0){
+					hasTemple = graph.pathFromTo(surrSets[i], -6);
+					if(hasTemple){
+						err = true;
+					}
+					if(player.numTemples > 1){
+						hasTemple = graph.pathFromTo(surrSets[i], -9);
+						if(hasTemple){
+							err = true;
+						}
+					}
+				}
+				if(err){
+					return false;
+				}
+			}
+		}
+	}
+}
+function expandOnTerrain() {
+	var player = currPlayer == 1 ? Player1 : Player2;
+	var coordsE = [{r: 0, c: -1}, {r: -1, c: -1}, {r: -1, c: 0},
+					{r: 0, c: 1}, {r: 1, c: 0}, {r: 1, c: -1}];
+	var coordsO = [{r: 0, c: -1}, {r: -1, c: 0}, {r: -1, c: 1},
+					{r: 0, c: 1}, {r: 1, c: 1}, {r: 1, c: 0}];
+	for(var i = 0; i < hexGrid.length; i++) {
+		for(var j = 0; j < coordsE.length; j++) {
+			if(hexGrid[i][6].row % 2 == 0){
+				if((hexGrid[i][6].row == coordsE[j].r + expansion.row) &&
+					(hexGrid[i][6].col == coordsE[j].c + expansion.col)) {
+					if(hexGrid[i][6].type == expansion.terrain
+						&& hexGrid[i][6].towers == 0
+						&& hexGrid[i][6].player != (-1)*currPlayer){
+							console.log("adios");
+						for(var i = 0; i < hexGrid[i][6].level; i++){
+							console.log("add");
+							addHut(hexGrid[i]);
+							hexGrid[i][6].huts++;
+							player.numHuts++;
+							if(player.numHuts >= 20){
+								player.placedBuilding = true;
+								window.alert("You have no more huts to build.");
+								return;
+							}
+						}
+						hexGrid[i][6].player = currPlayer;
+						player.placedBuilding = true;
+					}
+				}
+			} else {
+				if((hexGrid[i][6].row == coordsO[j].r + expansion.row) &&
+					(hexGrid[i][6].col == coordsO[j].c + expansion.col)) {
+					if(hexGrid[i][6].type == expansion.terrain
+						&& hexGrid[i][6].towers == 0
+						&& hexGrid[i][6].player != (-1)*currPlayer){
+							console.log("adios");
+						for(var i = 0; i < hexGrid[i][6].level; i++){
+							console.log("add");
+							addHut(hexGrid[i]);
+							hexGrid[i][6].huts++;
+							player.numHuts++;
+							if(player.numHuts >= 20){
+								player.placedBuilding = true;
+								window.alert("You have no more huts to build.");
+								return;
+							}
+						}
+						hexGrid[i][6].player = currPlayer;
+						player.placedBuilding = true;
+					}
+				}
+			}
+		}
+	}
+}
+function erupt() {
+	var covered1 = [];
+	var covered2 = [];
+	for(var i = 0; i < hexGrid.length; i++) {
+		var backHex = hexGrid[i];
+		for(var k = 0; k < 3; k++) {
+			if(triHex[k][6].row == backHex[6].row
+				&& triHex[k][6].col == backHex[6].col
+				&& backHex[6].type != 5
+				&& backHex[6].huts > 0){
+				//checking for destroyed settlements
+				if(backHex[6].player == 1){
+					covered1.push(backHex);
+				} else{
+					covered2.push(backHex);
+				}
+			}
+		}
+	}
+
+	if(covered1.length != 0){
+		var numDestroyed = covered1.length;
+		var coveredID = covered1[0][6].row * numRow + covered1[0][6].col;
+		var graph = Player1.settlements;
+		var numInSettlement = graph.BFS(coveredID);
+		if(numDestroyed == numInSettlement){
+			window.alert("You may not destroy an entire settlement.");
+			return false;
+		} else{
+			while(covered1.length != 0){
+				var coveredHex = covered1.pop();
+				Player1.numHuts -= coveredHex[6].huts;
+				coveredHex[6].huts = 0;
+				var hexID = coveredHex[6].row * numRow + coveredHex[6].col;
+				graph.removeVertex(hexID);
+			}
+			eruptionOn = false;
+		}
+	}
+	if(covered2.length != 0){
+		var numDestroyed = covered2.length;
+		var coveredID = covered2[0][6].row * numRow + covered2[0][6].col;
+		var graph = Player2.settlements;
+		var numInSettlement = graph.BFS(coveredID);
+		if(numDestroyed == numInSettlement){
+			window.alert("You may not destroy an entire settlement.");
+			return false;
+		} else{
+			while(covered2.length != 0){
+				var coveredHex = covered2.pop();
+				Player2.numHuts -= coveredHex[6].huts;
+				coveredHex[6].huts = 0;
+				var hexID = coveredHex[6].row * numRow + coveredHex[6].col;
+				graph.removeVertex(hexID);
+			}
+			eruptionOn = false;
+		}
+	}
+	return true;
+}
+function endGame() {
+	var winner;
+	var loser;
+	if(win == 1){
+		winner = Player1;
+		loser = Player2;
+	} else if(win == 2){
+		winner = Player2;
+		loser = Player1;
+	}
+	context.save();
+	context.fillStyle = "#323031";
+	context.fillRect(500, 150, 300, 350);
+	context.fillStyle = "white";
+	context.fillRect(530, 180, 240, 40);
+
+	context.font = "25px Lucida Console";
+	context.textAlign = "center";
+	context.fillStyle = "#323031";
+	context.fillText(`${winner.id} WON`, 650, 210);
+
+	context.fillStyle = "white";
+	context.font = "16px Lucida Console";
+	context.fillText(`${loser.id} lost. lmao`, 650, 360);
+
+	context.font = "16px Lucida Console";
+	context.fillText(`huts: ${winner.numHuts}`, 650, 270);
+	context.fillText(`towers: ${winner.numTowers}`, 650, 290);
+	context.fillText(`temples: ${winner.numTemples}`, 650, 310);
+
+	context.fillText(`huts: ${loser.numHuts}`, 650, 400);
+	context.fillText(`towers: ${loser.numTowers}`, 650, 420);
+	context.fillText(`temples: ${loser.numTemples}`, 650, 440);
+	context.restore();
+}
+function checkEarlyVictory(){
+	var complete = 0;
+	(Player1.numHuts == 20) ? complete++ : complete;
+	(Player1.numTowers == 2) ? complete++ : complete;
+	(Player1.numTemples == 3) ? complete++ : complete;
+	if(complete > 1){
+		return 1;
+	}
+	complete = 0;
+	(Player2.numHuts == 20) ? complete++ : complete;
+	(Player2.numTowers == 2) ? complete++ : complete;
+	(Player2.numTemples == 3) ? complete++ : complete;
+	if(complete > 1){
+		return 2;
+	}
+	return 0;
+}
+function checkEarlyElim(){
+	for(var i = 0; i < hexGrid.length; i ++) {
+		if(hexGrid[i][6].type != -1 && hexGrid[i][6].type != 5) {
+			var hutValid = checkValidHut(hexGrid[i]);
+			var towerValid = checkValidTower(hexGrid[i]);
+			var templeValid = checkValidTemple(hexGrid[i]);
+			if(hutValid || towerValid || templeValid){
+				return false; //will not be eliminated
+			}
+		}
+	}
+	window.alert("You have been eliminated because there are no possible places for you to build anymore.");
+	return true; //will be eliminated
+}
+function calcWinner() {
+	if(Player1.numTemples > Player2.numTemples){
+		return 1;
+	} else if(Player1.numTemples < Player2.numTemples){
+		return 2;
+	} else{
+		if(Player1.numTowers > Player2.numTowers){
+			return 1;
+		} else if(Player1.numTowers < Player2.numTowers){
+			return 2;
+		} else{
+			if(Player1.numHuts > Player2.numHuts){
+				return 1;
+			} else if(Player1.numHuts < Player2.numHuts){
+				return 2;
+			} else{
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+function goToCoords(col, row, hex) {
+	//goToCoords: moves hex to a certain coordinate
+	for(var i = 0; i < hexGrid.length; i ++) {
+		if(hexGrid[i][6].row == row && hexGrid[i][6].col == col) {
+			var backHex = hexGrid[i];
+			for(var k = 0; k < 6; k++) {
+				hex[k].x = backHex[k].x;
+				hex[k].y = backHex[k].y;
+			}
+			hex[6].row = row;
+			hex[6].col = col;
+			hex[6].cenX = backHex[6].cenX;
+			hex[6].cenY = backHex[6].cenY;
+			break;
+		}
+	}
+}
+function getHexAtCoords(col, row) {
+	//getHexAtCoords: returns a hex b/c i sucked at making an efficient grid
+	for(var i = 0; i < hexGrid.length; i ++) {
+		if(hexGrid[i][6].row == row && hexGrid[i][6].col == col) {
+			return hexGrid[i];
+		}
+	}
+}
+function toggleTransparency(){
+	var coords = [{c: triHex[0][6].col, r: triHex[0][6].row},
+					  {c: triHex[1][6].col, r: triHex[1][6].row},
+					  {c: triHex[2][6].col, r: triHex[2][6].row}];
+	var hex1 = getHexAtCoords(coords[0].c, coords[0].r);
+  	var hex2 = getHexAtCoords(coords[1].c, coords[1].r);
+  	var hex3 = getHexAtCoords(coords[2].c, coords[2].r);
+	var transparency = false;
+	for(var i = 0; i < hexGrid.length; i ++) {
+		for(var j = 0; j < coords.length; j ++) {
+			if(hexGrid[i][6].row == coords[j].r && hexGrid[i][6].col == coords[j].c){
+				if(hexGrid[i][6].type != -1) {
+					transparency = true;
+				}
+			}
+		}
+	}
+	return transparency;
+}
+function checkPlacementConflict(sendAlert) {
+	var coordsE = [{r: 0, c: -1}, {r: -1, c: -1}, {r: -1, c: 0},
+					{r: 0, c: 1}, {r: 1, c: 0}, {r: 1, c: -1}];
+	var coordsO = [{r: 0, c: -1}, {r: -1, c: 0}, {r: -1, c: 1},
+					{r: 0, c: 1}, {r: 1, c: 1}, {r: 1, c: 0}];
+
+	for(var k = 0; k < 3; k++){
+		hex = triHex[k];
+		for(var i = 0; i < hexGrid.length; i++) {
+			for(var j = 0; j < coordsE.length; j++) {
+				if(hexGrid[i][6].row % 2 == 0){
+					if((hexGrid[i][6].row == coordsE[j].r + hex[6].row) &&
+						(hexGrid[i][6].col == coordsE[j].c + hex[6].col)) {
+						if(hexGrid[i][6].type != -1){
+							return true;
+						}
+					}
+				} else {
+					if((hexGrid[i][6].row == coordsO[j].r + hex[6].row) &&
+						(hexGrid[i][6].col == coordsO[j].c + hex[6].col)) {
+						if(hexGrid[i][6].type != -1){
+							return true;
+						}
+					}
+				}
+			}
+		}
+	}
+	if(sendAlert){
+		window.alert("You must connect your tile to already placed tiles.");
+	}
+	return false;
+}
+function checkEvenGroundConflict(coords, sendAlert) {
+	var levelConflict = false;
+	var conflict = 0;
+
+	//find level of each hexGrid
+	var hex1 = getHexAtCoords(coords[0].c, coords[0].r);
+	var hex2 = getHexAtCoords(coords[1].c, coords[1].r);
+	var hex3 = getHexAtCoords(coords[2].c, coords[2].r);
+
+	if(hex1[6].level != hex2[6].level ||
+		hex2[6].level != hex3[6].level ||
+		hex3[6].level != hex1[6].level) {
+		levelConflict = true;
+	}
+
+	for(var i = 0; i < hexGrid.length; i++) {
+		for(var j = 0; j < coords.length; j++) {
+			if(hexGrid[i][6].row == coords[j].r && hexGrid[i][6].col == coords[j].c){
+				if(hexGrid[i][6].type != -1) {
+					conflict++;
+				}
+			}
+		}
+	}
+	if(conflict == 1 || conflict == 2 || levelConflict) {
+		if(sendAlert){
+			window.alert("You must place your tile on even ground.");
+		}
+		return false;
+	}
+	return true; //check?????3
+}
+function checkVolcanoConflict(coords, sendAlert) {
+	for(var i = 0; i < coords.length; i++){
+		var hex = getHexAtCoords(coords[i].c, coords[i].r);
+		for(var k = 0; k < 3; k++){
+			if(triHex[k][6].type == 5 && triHex[k][6].col == hex[6].col &&
+				triHex[k][6].row == hex[6].row){
+				if(hex[6].type == 5){
+					if(hex[6].arrow == triHex[k][6].arrow){
+						if(sendAlert){
+							window.alert("You cannot stack a volcano on another volcano of the same direction.");
+						}
+						return false;
+					} else{
+						eruptionOn = true;
+					}
+				} else if(hex[6].type != -1){
+					if(sendAlert){
+						window.alert("You must stack a volcano on top of another volcano.");
+					}
+					return false;
+				}
+			} else if(triHex[k][6].col == hex[6].col && triHex[k][6].row == hex[6].row){
+				if(hex[6].towers > 0){
+					if(sendAlert){
+						window.alert("You may not erupt over a tower.");
+					}
+					eruptionOn = false;
+					return false;
+				} else if(hex[6].temples > 0){
+					if(sendAlert){
+						window.alert("You may not erupt over a temple.");
+					}
+					eruptionOn = false;
+					return false;
+				}
+			}
+		}
+	}
+	return true;
+}
+function checkConflicts(sendAlert){
+	//< ---- EXPAND THE LANDSCAPE: ---- >
+	var placement = true;
+	var volcano = true;
+	var evenGround = true;
+	var coords = [{c: triHex[0][6].col, r: triHex[0][6].row},
+					  {c: triHex[1][6].col, r: triHex[1][6].row},
+					  {c: triHex[2][6].col, r: triHex[2][6].row}];
+
+	if(!firstTilePlacement){
+		placement = checkPlacementConflict(sendAlert);
+		volcano = checkVolcanoConflict(coords, sendAlert);
+		evenGround = checkEvenGroundConflict(coords, sendAlert);
+	}
+
+	if(placement && volcano && evenGround){
+		return true;
+	}
+	return false; //isAllowed var in handleMouseUp
+
+	//< ---- VULCANIC ERUPTION ---- >
+	//check that V on V has different direction
+	//check that tile stacks are V on V tho
+	//checkVolcanoConflict(c1, r1, c2, r2, c3, r3)
+	//no free space underneath AKA EVEN GROUND aka all should start out at level 0
+	//checkEvenGroundConflict(c1, r1, c2, r2, c3, r3)
+	//covered huts are returned
+	//TO-DO: no covering of temples/towers
+	//TO-DO: no covering of complete settlements (???)
+}
+
 var e;
 var mouseX, mouseY;
 var clickedIndex;
-//ROTATE: onkeypress R
-//FLIP: onkeypress F, aka change lava direction AND bottom 2 colors are switched
 function handleKeyPress(){
 	e = window.event;
 	var key = e.keyCode;
 	var row = triHex[0][6].row; //hexUp basically
 	var col = triHex[0][6].col;
+	var isPressed = false;
 
 	if(key == 82) { //ROTATE
+		isPressed = true;
 		context.clearRect(0, 0, canvas.width, canvas.height);
 		var uColor = triHex[0][6].type;
 		var lColor = triHex[1][6].type;
@@ -571,6 +1360,7 @@ function handleKeyPress(){
 			triHex[4].rotation++;
 		}
 	} else if(key == 70) { //FLIP
+		isPressed = true;
 		triHex[4].flip *= -1;
 		var r = triHex[4].rotation;
 		if(r == 0 || r == 1){
@@ -591,58 +1381,178 @@ function handleKeyPress(){
 		triHex[i][6].flip = triHex[4].flip;
 		triHex[i][6].arrow = triHex[4].arrow;
 	}
+	if(isPressed){
+		var isAllowed = checkConflicts(false); //false is for do not send alerts
+		triHex[4].conflictOn = !isAllowed ? true : false;
+		triHex[4].transpOn = toggleTransparency();
+	}
 	drawScreen();
 }
-
-//turns on dragging & shadow
 function handleMouseDown() {
 	e = window.event;
 	mouseX = e.clientX - 50;
 	mouseY = e.clientY - 50;
+	var player = currPlayer == 1 ? Player1 : Player2;
 
 	for(var i = 0; i < 3; i++) {
 		var hex = triHex[i];
 		outlineHex(hex);
 		if(context.isPointInPath(mouseX, mouseY)) {
+			if(player.placedTile && !player.placedBuilding){
+				window.alert("You must build or expand a settlement to end your turn.");
+				return;
+			}
 			triHex[4].isDragging = true;
 			clickedIndex = i;
 		}
 	}
 
-	//check if hutStamp was clicked hahahaha
+	//check if hutStamp or towerStamp was clicked hahahaha
+	context.beginPath();
 	context.arc(hutStamp.dx, hutStamp.dy, 10, 0, 2*Math.PI);
 	if(context.isPointInPath(mouseX, mouseY)) {
-		if(hutStamp.count > 0){
+		if(!player.placedTile){
+			window.alert("You must place a tile first.");
+		} else if(player.numHuts < 20){
 			hutStamp.isDragging = true;
 		} else{
 			window.alert("You have no more huts to build.");
 		}
+		var result = checkEarlyElim();
+		if(result){
+			win = (currPlayer == 1) ? 2 : 1;
+			gameOver = true;
+			endGame();
+		}
+	} else{
+		context.beginPath();
+		context.arc(towerStamp.dx, towerStamp.dy, 15, 0, 2*Math.PI);
+		if(context.isPointInPath(mouseX, mouseY)) {
+			if(!player.placedTile){
+				window.alert("You must place a tile first.");
+			} else if(player.numTowers < 2){
+				towerStamp.isDragging = true;
+			} else{
+				window.alert("You have no more towers to build.");
+			}
+			var result = checkEarlyElim();
+			if(result){
+				win = (currPlayer == 1) ? 2 : 1;
+				gameOver = true;
+				endGame();
+			}
+		}
 	}
-	context.arc(towerStamp.dx, towerStamp.dy, 15, 0, 2*Math.PI);
+	//check if temple stamp was clicked loool
+	context.beginPath();
+	context.moveTo(templeStamp.dx, templeStamp.dy);
+	context.lineTo(templeStamp.dx + 15, templeStamp.dy + 30);
+	context.lineTo(templeStamp.dx - 15, templeStamp.dy + 30);
+	context.lineTo(templeStamp.dx, templeStamp.dy);
 	if(context.isPointInPath(mouseX, mouseY)) {
-		if(towerStamp.count > 0){
-			towerStamp.isDragging = true;
+		if(!player.placedTile){
+			window.alert("You must place a tile first.");
+		} else if(player.numTemples < 3){
+			templeStamp.isDragging = true;
 		} else{
-			window.alert("You have no more towers to build.");
+			window.alert("You have no more temples to build.");
+		}
+		var result = checkEarlyElim();
+		if(result){
+			win = (currPlayer == 1) ? 2 : 1;
+			gameOver = true;
+			endGame();
 		}
 	}
 
-	triHex[4].shadowOn = true
+	//check if expand settlement was clicked
+	if(expansion.chooseSettlement){
+		if(player.numHuts == 20){
+			window.alert("You cannot expand your settlements because you have no more huts to build.");
+			expansion.on = false;
+			expansion.chooseSettlement = false;
+			return;
+		}
+		//get hex at the coords of where the mouseX & mouseY are
+		//whatever is clicked, that is the chosen settlement
+		for(var i = 0; i < hexGrid.length; i++) {
+			var backHex = hexGrid[i];
+			outlineHex(backHex);
+			if(context.isPointInPath(mouseX, mouseY)) {
+				if(backHex[6].player == currPlayer){
+					if(backHex[6].numHuts > 0 ||
+						backHex[6].numTowers > 0 ||
+						backHex[6].numTemples > 0){
+							expansion.row = backHex[6].row;
+							expansion.col = backHex[6].col;
+					}
+				} /*else{
+					window.alert("Please pick one of your settlements.");
+					return;
+				}*/
+			}
+		}
+		window.alert("Expand An Existing Settlement\nChoose an adjacent settlement to the Chosen Land. All adjacent settlements of the Chosen Land with that terrain type will be occupied.");
+		expansion.chooseSettlement = false;
+		expansion.chooseTerrain = true;
+	} else if(expansion.chooseTerrain){
+		for(var i = 0; i < hexGrid.length; i++) {
+			var backHex = hexGrid[i];
+			outlineHex(backHex);
+			if(context.isPointInPath(mouseX, mouseY)) {
+				expansion.terrain = backHex[6].type;
+				break;
+			}
+		}
+		expandOnTerrain();
+		console.log("hello");
+		drawScreen();
+		expansion.chooseTerrain = false;
+		expansion.on = false;
+	}
+
+	//check is Expand Settlement was clicked
+	context.beginPath();
+	context.moveTo(55, 650);
+	context.lineTo(55 + 175, 650);
+	context.lineTo(55 + 175, 650 + 35);
+	context.lineTo(55, 650 + 35);
+	context.lineTo(55, 650);
+	if(context.isPointInPath(mouseX, mouseY)) {
+		if(!player.placedTile){
+			window.alert("You must place a tile first.");
+			return;
+		}
+		if(!expansion.on && (player.settlements).vertices.length != 0){
+			window.alert("Expand An Existing Settlement\nChoose one of your settlements to expand. This settlement (for now) is the Chosen Land");
+			expansion.on = true;
+			expansion.chooseSettlement = true;
+		} else if(!expansion.on && (player.settlements).vertices.length == 0){
+			window.alert("You may not expand your settlements if you have none.");
+		}
+	}
+
+	triHex[4].shadowOn = true;
 }
-
-//turns off dragging & shadow, resets new tile
 function handleMouseUp() {
-	//first tile placed does not apply to the "connected tiles" rule
-
 	//color the tiles and reset the tile's position with new colors
+	var player = currPlayer == 1 ? Player1 : Player2;
+
 	if(mouseX > 280 && triHex[4].isDragging){
 		//RESET TRIHEX POSITION BACK TO START
-		var isAllowed = checkConflicts();
+		var isAllowed = checkConflicts(true); //true is for sendAlert
+
+		if(eruptionOn){  //wipes out any settlements underneath
+			if(!erupt()){
+				resetTriHex();
+				return;
+			}
+		}
+
 		for(var i = 0; i < hexGrid.length; i++) {
 			var backHex = hexGrid[i];
 			for(var k = 0; k < 3; k++) {
 				if(triHex[k][6].row == backHex[6].row && triHex[k][6].col == backHex[6].col){
-					//console.log(isAllowed);
 					if(isAllowed) {
 						if(backHex[6].type != -1) {
 							backHex[6].level++;
@@ -650,42 +1560,23 @@ function handleMouseUp() {
 						backHex[6].type = triHex[k][6].type;
 						backHex[6].rot = triHex[k][6].rot;
 						backHex[6].arrow = triHex[k][6].arrow;
-					} else{ //TO-DO: CLEAN UP PROCESS LOOOL
-						goToCoords(1, 4, triHex[0]);
-						goToCoords(1, 5, triHex[1]);
-						goToCoords(2, 5, triHex[2]);
-						triHex[4].rotation = 0;
-						triHex[4].flip = 1;
-						for(var k = 0; k < 3; k++) {
-							triHex[k][6].transpOn = false;
-							triHex[k][6].rot = 0;
-							triHex[k][6].flip = 1;
-							triHex[k][6].arrow = 0;
+						if(!player.placedTile){
+							player.placedTile = true;
 						}
-						triHex[4].isDragging = false;
-						triHex[4].shadowOn = false;
-						triHex[4].conflictOn = false;
+					} else{
+						resetTriHex();
 						return;
 					}
 				}
 			}
 		}
-		goToCoords(1, 4, triHex[0]);
-		goToCoords(1, 5, triHex[1]);
-		goToCoords(2, 5, triHex[2]);
+
 		randTileStack(triHex);
-		triHex[4].rotation = 0;
-		triHex[4].flip = 1;
-		for(var k = 0; k < 3; k++) {
-			triHex[k][6].transpOn = false;
-			triHex[k][6].rot = 0;
-			triHex[k][6].flip = 1;
-			triHex[k][6].arrow = 0;
+		resetTriHex();
+		if(firstTilePlacement == true){
+			firstTilePlacement = false;
 		}
 	}
-	triHex[4].isDragging = false;
-	triHex[4].shadowOn = false;
-	triHex[4].conflictOn = false;
 
 	for(var i = 0; i < hexGrid.length; i++) {
 		var backHex = hexGrid[i];
@@ -693,8 +1584,32 @@ function handleMouseUp() {
 		if(context.isPointInPath(mouseX, mouseY)) {
 			updateHut(backHex);
 			updateTower(backHex);
+			updateTemple(backHex);
 		}
 	}
+
+	if(player.placedTile == true && player.placedBuilding == true){
+		currPlayer *= -1;
+		player.placedTile = false;
+		player.placedBuilding = false;
+	}
+
+	//all buildings built of out 2/3 types, immediate win
+	var result = checkEarlyVictory();
+	if(result != 0){
+		win = result;
+		gameOver = true;
+		endGame();
+	}
+	//regular end of game (tiles ran out)
+	if(count < 0){
+		win = calcWinner();
+		gameOver = true;
+		endGame();
+	}
+	//a player who cannot build anymore is immediately eliminated
+	//try "putting" a building in every place possible and if all return conflict
+	//then automatic elimination
 
 	hutStamp.isDragging = false;
 	hutStamp.dx = hutStamp.cenX;
@@ -704,15 +1619,12 @@ function handleMouseUp() {
 	towerStamp.dx = towerStamp.cenX;
 	towerStamp.dy = towerStamp.cenY;
 
-	if(firstTilePlacement == true){
-		firstTilePlacement = false;
-	}
+	templeStamp.isDragging = false;
+	templeStamp.dx = templeStamp.cenX;
+	templeStamp.dy = templeStamp.cenY;
 
 	drawScreen();
 }
-
-//basic dragging movement, snap to grid, transparency toggle
-//TO-DO: be able to move trihex as a whole during snap to grid
 function handleMouseMove() {
 	e = window.event;
 	var mx = e.clientX - 50;
@@ -721,13 +1633,7 @@ function handleMouseMove() {
 	var dy = my - mouseY;
 
 	if(triHex[4].isDragging) {
-		for(var k = 0; k < 3; k++) {
-			if(triHex[k][6].transpOn == true) {
-				triHex[k][6].transpOn = false;
-			}
-		}
-		triHex[4].conflictOn = false;
-
+		//if the backGrid is overlapped && the backHex.type != -1, turn on transparency
 		for(var i = 0; i < hexGrid.length; i++) {
 			var backHex = hexGrid[i];
 			var row = backHex[6].row;
@@ -771,8 +1677,28 @@ function handleMouseMove() {
 							goToCoords(col - 1, row, triHex[1]);
 							goToCoords(col - 1, row + 1, triHex[2]);
 						}
-					} //do i need the two other if statements??
+					} else if(clickedIndex == 1) { //hexLeft
+						if(row % 2 == 0){
+							goToCoords(col, row - 1, triHex[2]);
+							goToCoords(col + 1, row - 1, triHex[0]);
+						} else {
+							goToCoords(col - 1, row - 1, triHex[2]);
+							goToCoords(col, row - 1, triHex[0]);
+						}
+					}	else if(clickedIndex == 2) { //hexRight
+						goToCoords(col, row, triHex[2]);
+						if(row % 2 == 0){
+							goToCoords(col + 1, row - 1, triHex[0]);
+							goToCoords(col, row - 1, triHex[1]);
+						} else{
+							goToCoords(col, row - 1, triHex[0]);
+							goToCoords(col - 1, row - 1, triHex[1]);
+						}
+					}
 				}
+				var isAllowed = checkConflicts(false); //false is for do not send alerts
+				triHex[4].conflictOn = !isAllowed ? true : false;
+				triHex[4].transpOn = toggleTransparency();
 			}
 		}
 	}
@@ -783,6 +1709,9 @@ function handleMouseMove() {
 	} else if(towerStamp.isDragging){
 		towerStamp.dx += dx;
 		towerStamp.dy += dy;
+	} else if(templeStamp.isDragging){
+		templeStamp.dx += dx;
+		templeStamp.dy += dy;
 	}
 
 	mouseX = mx;
@@ -794,8 +1723,7 @@ function handleMouseMove() {
 </head>
 <body>
 <div style="position: absolute; top: 50px; left: 50px;" id="container">
-<canvas id="canvas" width="1000" height="800" style="position: absolute; z-index: 0"></canvas>
-<canvas id="hex0" width="1000" height="800" style="position: absolute;  z-index: 1"></canvas>
+<canvas id="canvas" width="1300" height="800" style="position: absolute; z-index: 0"></canvas>
 </div>
 </body>
 </html>
